@@ -98,6 +98,7 @@ export function patch(id, changes) {
   const was = previousOf(element, changes);
   const next = { ...changes };
   if (changes.style) next.style = { ...element.style, ...changes.style };
+  if (changes.props) next.props = mergeProps(element.props, changes.props);
   putElement({ id, ...next });
   push({ op: 'element.update', id: ref(id), ...changes });
 
@@ -242,11 +243,7 @@ export function restore(shot) {
  */
 export function setProps(id, props) {
   const element = state.elements.get(id);
-  const merged = { ...(element?.props || {}) };
-  for (const [name, value] of Object.entries(props)) {
-    if (value === null || value === '') delete merged[name];
-    else merged[name] = value;
-  }
+  const merged = mergeProps(element?.props, props);
   const was = element ? { ...(element.props || {}) } : {};
 
   putElement({ id, props: merged, ...(merged.start ? { agent: null } : {}) });
@@ -258,6 +255,15 @@ export function setProps(id, props) {
     undo: () => { const back = byNo(no); if (back) setProps(back.id, fillGaps(props, was)); },
     redo: () => { const again = byNo(no); if (again) setProps(again.id, props); },
   });
+}
+
+function mergeProps(previous, patch) {
+  const props = { ...previous };
+  for (const [name, value] of Object.entries(patch)) {
+    if (value === null || value === '') delete props[name];
+    else props[name] = value;
+  }
+  return props;
 }
 
 /** Отмена должна убрать то, чего раньше не было: пустое значение сносит доп. */

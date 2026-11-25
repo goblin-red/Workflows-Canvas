@@ -1,5 +1,5 @@
 import { folderId, hash, post } from 'goblin/api/client.js';
-import { setLook } from 'goblin/canvas/looks.js';
+import { currentLook, GRAPH_SKIN_STORE, setLook } from 'goblin/canvas/looks.js';
 import { emit, state } from 'goblin/core/state.js';
 import { t } from 'goblin/core/i18n.js';
 import { flush } from 'goblin/edit/scene.js';
@@ -8,6 +8,26 @@ import { flush } from 'goblin/edit/scene.js';
 export async function selectClassicSkin(name) {
   if (name !== 'graph') {
     setLook(name);
+    return;
+  }
+
+  if (globalThis.GOBLIN_CANONICAL_VISUAL) {
+    const previous = new URL(location.href);
+    if (state.dirty) await flush();
+    if (state.dirty) {
+      emit('refused', t('editor.looks.saving_before_switch'));
+      return;
+    }
+    if (previous.href !== location.href) return;
+    previous.searchParams.set('skin', currentLook());
+    history.replaceState(history.state, '', previous);
+
+    const graph = new URL('graph.php', previous);
+    graph.search = previous.search;
+    graph.searchParams.set('skin', 'graph');
+    graph.hash = previous.hash;
+    try { localStorage.setItem(GRAPH_SKIN_STORE, 'graph'); } catch {}
+    location.assign(graph);
     return;
   }
 

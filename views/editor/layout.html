@@ -29,7 +29,22 @@
 <!-- Выбранный скин ставим до первой отрисовки. -->
 <script>
   const skinParams = new URLSearchParams(location.search);
-  if (skinParams.get('visual') === '1') {
+  if (window.GOBLIN_CANONICAL_VISUAL) {
+    let look = skinParams.get('skin');
+    if (!look && !skinParams.has('classic') && skinParams.get('visual') !== '1') {
+      try { look = localStorage.getItem('goblin-graph-skin'); } catch {}
+    }
+    if (look === 'graph') {
+      const graph = new URL('graph.php', location.href);
+      graph.search = location.search;
+      graph.hash = location.hash;
+      graph.searchParams.set('skin', 'graph');
+      window.GOBLIN_VISUAL_REDIRECTING = true;
+      location.replace(graph);
+    } else {
+      document.body.dataset.look = look || 'studio';
+    }
+  } else if (skinParams.get('visual') === '1') {
     document.body.dataset.look = skinParams.get('skin') || 'studio';
   } else try {
     var look = localStorage.getItem('goblin-look');
@@ -48,6 +63,8 @@
 <button class="side-toggle side-right" id="side-right" title="{{t:editor.layout.hide_right}}">›</button>
 {{runbar}}
 {{dialogs}}
-<script type="module" src="src/main.js?v={{version}}"></script>
+<script type="module">
+  if (!window.GOBLIN_VISUAL_REDIRECTING) import('./src/main.js?v={{version}}');
+</script>
 </body>
 </html>

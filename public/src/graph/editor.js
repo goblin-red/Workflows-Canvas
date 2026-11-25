@@ -6,7 +6,7 @@ import { mountGraphRun } from 'goblin/graph/run.js';
 import { mountGraphProjects } from 'goblin/graph/projects.js';
 import { mountGraphAssistant } from 'goblin/graph/assistant.js';
 import { blockContentEditor } from 'goblin/graph/content.js';
-import { SKINS } from 'goblin/canvas/looks.js';
+import { GRAPH_SKIN_STORE, LOOKS } from 'goblin/canvas/looks.js';
 import { t } from 'goblin/core/i18n.js';
 
 const ui = (name) => document.getElementById('graph-' + name);
@@ -14,9 +14,8 @@ const dialog = ui('dialog');
 const panel = ui('panel');
 const readOnly = document.body.dataset.viewOnly === 'true';
 const skinSelect = ui('skin');
-const skinKey = 'goblin-graph-skin';
-for (const [id, skin] of Object.entries(SKINS)) {
-  if (id !== 'graph') skinSelect.add(new Option(skin.title, id));
+for (const [id, skin] of Object.entries(LOOKS)) {
+  skinSelect.add(new Option(skin.title, id));
 }
 const catalogEnabled = document.body.dataset.catalogEnabled === 'true';
 const compactLayout = matchMedia('(max-width: 650px), (pointer: coarse) and (max-width: 900px)');
@@ -349,6 +348,15 @@ function expandCurrent() {
   if (model) expanded.add(contextKey({ startId: model.rootId, path: [] }));
 }
 
+function placeProjects() {
+  const overview = !project;
+  const projects = ui('projects');
+  const host = ui(overview ? 'projects-overview' : 'projects-rail');
+  if (projects.parentElement === host) return;
+  host.append(projects);
+  if (overview) projects.querySelector('.graph-projects-modes button:last-child')?.click();
+}
+
 function render(fit = false) {
   if (!model) view = 'canvas';
   const parentId = model?.context.blockId;
@@ -368,14 +376,9 @@ function render(fit = false) {
     projectsStamp = stamp;
     if (model || !project) void projectsPanel.refresh(project);
   }
-  const projects = ui('projects');
-  const projectsHost = project ? ui('projects-rail') : ui('projects-overview');
   ui('project-start').hidden = !!project;
   ui('tree-heading').hidden = !project;
-  if (projects.parentElement !== projectsHost) {
-    projectsHost.append(projects);
-    if (!project) projects.querySelector('.graph-projects-modes button:last-child')?.click();
-  }
+  placeProjects();
   syncControls();
 }
 
@@ -1026,11 +1029,10 @@ saveForm.onsubmit = async (event) => {
   const style = new FormData(event.currentTarget).get('style');
   const scene = canvasScene();
   const name = title(scene.parentId);
-  const skin = skinSelect.value;
   saveDialog.close();
   try {
     const { saveGraphPicture } = await import('goblin/graph/export.js');
-    await saveGraphPicture({ format, style, skin, title: name, scene });
+    await saveGraphPicture({ format, style, title: name, scene });
   } catch (error) {
     status(error.message || t('editor.files.save_failed'));
   }
@@ -1092,30 +1094,20 @@ layoutControl.onchange = () => {
 };
 compactLayout.addEventListener('change', applyLayout);
 applyLayout();
-function applySkin(name) {
-  const skin = Object.hasOwn(SKINS, name) ? name : 'graph';
-  skinSelect.value = skin;
-  document.body.dataset.graphSkin = skin;
-  canvas.setSkin(skin);
-}
-const skinAddress = new URL(location.href);
-const explicitSkin = skinAddress.searchParams.has('skin') || skinAddress.searchParams.has('classic');
-let firstSkin = skinAddress.searchParams.get('skin');
-try {
-  if (!firstSkin && skinAddress.searchParams.has('classic')) {
-    firstSkin = skinAddress.searchParams.has('visual') ? 'studio' : localStorage.getItem('goblin-look') || 'work';
-  }
-  firstSkin ||= localStorage.getItem(skinKey);
-} catch { /* Скин работает без сохранения предпочтений. */ }
-applySkin(firstSkin);
 skinSelect.onchange = () => {
-  applySkin(skinSelect.value);
-  try { localStorage.setItem(skinKey, skinSelect.value); } catch {}
-  if (explicitSkin) {
-    const address = new URL(location.href);
-    address.searchParams.set('skin', skinSelect.value);
-    history.replaceState(null, '', address);
+  const skin = skinSelect.value;
+  skinSelect.value = 'graph';
+  if (!Object.hasOwn(LOOKS, skin)) return;
+  if (busy || pending || panelDirty || dialog.open) {
+    status(t('editor.looks.saving_before_switch'));
+    return;
   }
+  const visual = new URL('index.php', location.href);
+  visual.search = location.search;
+  visual.searchParams.set('skin', skin);
+  visual.hash = location.hash;
+  try { localStorage.setItem(GRAPH_SKIN_STORE, skin); } catch {}
+  location.assign(visual);
 };
 ui('dialog-cancel').onclick = () => dialog.close();
 dialog.addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });

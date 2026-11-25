@@ -100,11 +100,10 @@ export function initTopbar() {
   });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeMenu(); });
   window.addEventListener('resize', closeMenu);
-  /* Вид карточек имеет смысл только на холсте, но прятать его нельзя:
-     от этого шапка прыгала при каждом переключении вида работы. Гасим
-     на месте. В списке доступны «Студия» и переход в «Граф». */
+  /* В старой схеме смена вида карточек ограничена холстом. В редакторе
+     на графовых данных скин выбирается и в списке, и в иерархии. */
   const showLooks = () => {
-    const onCanvas = currentVariant() === 'canvas';
+    const onCanvas = currentVariant() === 'canvas' || globalThis.GOBLIN_CANONICAL_VISUAL;
     looks.classList.toggle('dimmed', !onCanvas && currentLook() !== 'studio');
     for (const option of menu.querySelectorAll('.look-option')) {
       option.disabled = !onCanvas && currentLook() !== 'studio' && !['studio', 'graph'].includes(option.dataset.look);
@@ -187,7 +186,8 @@ export function initTopbar() {
 
   linkBtn.onclick = (event) => {
     if (event.shiftKey) {
-      const plain = site() + '#p=' + api.projectKey() + (state.folder?.id ? '&f=' + state.folder.id : '');
+      const plain = globalThis.GOBLIN_CANONICAL_VISUAL ? location.href
+        : site() + '#p=' + api.projectKey() + (state.folder?.id ? '&f=' + state.folder.id : '');
       navigator.clipboard?.writeText(plain);
       toast(t('editor.topbar.canvas_link_copied'));
       return;

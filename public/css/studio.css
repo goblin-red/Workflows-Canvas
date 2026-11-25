@@ -275,8 +275,8 @@ body[data-look="studio"] .node.gateway .node-marks{right:50%;transform:translate
 
 /* Контейнеры, заметки и таблицы — тот же набор поверхностей и подписей. */
 body[data-look="studio"] .node.group .node-card{
-  background:linear-gradient(180deg,#ffffff0d 0%,#ffffff00 25%),
-    color-mix(in srgb,color-mix(in srgb,var(--card-fill,var(--surface-2)) 85%,#000) 60%,transparent);
+  --studio-frame-fill:color-mix(in srgb,color-mix(in srgb,var(--card-fill,var(--surface-2)) 85%,#000) 60%,transparent);
+  background:linear-gradient(180deg,#ffffff0d 0%,#ffffff00 25%),var(--studio-frame-fill);
   border-width:2px;border-color:color-mix(in srgb,var(--card-edge,var(--line-strong)) 90%,var(--ink-dim) 10%);
   box-shadow:none;border-radius:14px}
 body[data-look="studio"] .node.group .node-title{max-width:calc(100% - 170px);padding:12px 8px 12px 14px;
@@ -291,12 +291,12 @@ body[data-look="studio"] .node.group .node-title::before{display:none}
 body[data-look="studio"] .node-fold{top:50%;right:8px;border:0;background:var(--hover);box-shadow:none;color:var(--ink-dim)}
 body[data-look="studio"] .node-count{top:11px;right:54px;border:0;background:var(--hover);border-radius:5px;font-size:9px}
 body[data-look="studio"] .node.group.collapsed .node-card{
-  background:linear-gradient(180deg,#ffffff0d 0%,#ffffff00 25%),
-    color-mix(in srgb,var(--card-fill,var(--surface-2)) 85%,#000);
+  --studio-frame-fill:color-mix(in srgb,var(--card-fill,var(--surface-2)) 85%,#000);
   box-shadow:var(--shadow-1)}
 body[data-look="studio"] .node.area .node-card{border-style:dashed;
+  --studio-frame-fill:var(--card-fill,var(--surface-2));
   background:linear-gradient(var(--area-grad),transparent 0%,var(--area-dark) 25%,var(--area-dark) 100%),
-    var(--card-fill,var(--surface-2));
+    var(--studio-frame-fill);
   box-shadow:none;border-radius:14px}
 body[data-look="studio"] .node.area .node-title{position:absolute;inset:0 auto 0 0;width:35%;padding:0 18px;
   max-width:none;border:0;font:500 24px/1.3 var(--sans);letter-spacing:.04em;white-space:normal;
@@ -320,6 +320,17 @@ body[data-look="studio"] .node.block[data-step] .node-card{border-left-width:3px
 body[data-look="studio"] .node[data-step] .node-step{background:color-mix(in srgb,var(--run) 14%,var(--surface-2))}
 body[data-look="studio"] .node.decision[data-step] .node-card{border:0}
 body[data-look="studio"] .node-grip::after{width:11px;height:11px;border-width:2px;opacity:.65}
+
+/* Подсказка состава остаётся видна поверх выделения и оформления рамки. */
+body[data-look="studio"] .node.drop-add{--studio-drop-color:var(--ok)}
+body[data-look="studio"] .node.drop-remove{--studio-drop-color:var(--bad)}
+body[data-look="studio"] .node.node:is(.drop-add,.drop-remove) .node-card{
+  --studio-drop-rim:color-mix(in srgb,var(--studio-drop-color) 64%,var(--surface-2));
+  border-color:var(--studio-drop-rim);
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--studio-drop-color) 17%,transparent),var(--shadow-1)}
+body[data-look="studio"] .node:is(.group,.area):is(.drop-add,.drop-remove) .node-card{
+  background-color:color-mix(in srgb,var(--studio-drop-color) 9%,var(--studio-frame-fill))}
+body[data-look="studio"] .node.node.decision:is(.drop-add,.drop-remove) .node-card{background:var(--studio-drop-rim)}
 
 /* Окна, выпадающие меню, материалы, агенты, ИИ и прогон. */
 body[data-look="studio"] :is(.dialog,.screen,.search-box,.search-drop,.ai-drop,.link-box){

@@ -106,6 +106,7 @@ export const SKINS = {
 };
 
 const STORE = 'goblin-look';
+export const GRAPH_SKIN_STORE = 'goblin-graph-skin';
 
 /** Сенсорное устройство — телефон или планшет: палец, а не мышь. */
 export function isTouchDevice() {
@@ -115,6 +116,7 @@ export function isTouchDevice() {
 export function currentLook() {
   const active = document.body.dataset.look;
   if (Object.hasOwn(LOOKS, active)) return active;
+  if (globalThis.GOBLIN_CANONICAL_VISUAL) return 'studio';
   try {
     const saved = localStorage.getItem(STORE);
     if (saved && LOOKS[saved]) return saved;
@@ -131,11 +133,12 @@ export function setLook(name) {
   state.look = name;
   document.body.dataset.look = name;
   const address = new URL(location.href);
-  if (address.searchParams.get('visual') === '1' && address.searchParams.get('skin') !== name) {
+  const canonical = globalThis.GOBLIN_CANONICAL_VISUAL === true;
+  if ((canonical || address.searchParams.get('visual') === '1') && address.searchParams.get('skin') !== name) {
     address.searchParams.set('skin', name);
-    history.replaceState(null, '', address);
+    history.replaceState(history.state, '', address);
   }
-  try { localStorage.setItem(STORE, name); } catch {}
+  try { localStorage.setItem(canonical ? GRAPH_SKIN_STORE : STORE, name); } catch {}
   emit('look', name);
   emit('steps');   // перерисовать карточки целиком
 }

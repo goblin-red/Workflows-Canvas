@@ -17,7 +17,7 @@
   {{i18n}}
   <script type="importmap">{{importmap}}</script>
 </head>
-<body class="graph-editor" data-left="tabs" data-view-only="{{viewOnly}}" data-catalog-enabled="{{catalogEnabled}}">
+<body class="graph-editor" data-view-only="{{viewOnly}}" data-catalog-enabled="{{catalogEnabled}}">
   <header class="topbar graph-toolbar">
     <nav id="graph-crumbs" class="graph-navigation" aria-label="{{t:editor.graph.crumbs}}"></nav>
     <div class="graph-scene-controls" aria-label="{{t:editor.graph.scene_tools}}">
@@ -50,10 +50,13 @@
     </div>
   </header>
   <main class="workspace">
-    <aside class="rail" aria-label="{{t:editor.graph.project_tree}}">
-      <div id="graph-projects-rail"><div id="graph-projects"></div></div>
-      <h2 class="panel-title" id="graph-tree-heading">{{t:editor.graph.project_tree}}</h2>
-      <nav id="graph-tree" aria-label="{{t:editor.graph.project_blocks}}"></nav>
+    <aside class="rail graph-rail" aria-label="{{t:editor.graph.project_tree}}">
+      <div class="graph-rail-content">
+        <div id="graph-projects-rail"><div id="graph-projects"></div></div>
+        <h2 class="panel-title" id="graph-tree-heading">{{t:editor.graph.project_tree}}</h2>
+        <nav id="graph-tree" aria-label="{{t:editor.graph.project_blocks}}"></nav>
+      </div>
+      <img class="graph-rail-logo" src="img/logo-mark.svg" width="42" height="42" alt="Goblin">
     </aside>
     <section class="graph-scene" aria-label="{{t:editor.embed.scheme}}">
       <div id="graph-canvas"></div>
@@ -67,7 +70,6 @@
             <a class="btn btn-quiet" href="first-steps.php" target="_blank" rel="noopener">{{t:editor.settings.first_steps}}</a>
           </div>
         </form>
-        <img class="graph-start-logo" src="img/logo-mark.svg" width="26" height="26" alt="Goblin">
       </div>
       <div class="graph-notice">
         <p id="graph-status" role="status" aria-live="polite"></p>

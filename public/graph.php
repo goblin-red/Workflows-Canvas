@@ -13,6 +13,7 @@ $root = dirname(__DIR__);
 $version = editorVersion($root);
 $viewOnly = isset($_GET['view']);
 header('Content-Type: text/html; charset=utf-8');
+echo "<!--\n" . agentNote(true) . "\n-->\n";
 echo view($root . '/views/graph/editor.html', [
     'version' => $version,
     'lang' => lang(),

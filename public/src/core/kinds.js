@@ -13,21 +13,21 @@ import { t } from 'goblin/core/i18n.js';
 
 export const KINDS = {
   block:    { title: t('editor.kinds.block'),    icon: '▣', about: t('editor.kinds.block_about'),
-              sections: ['main', 'starter', 'step', 'spec', 'assets', 'shortcuts', 'agent', 'props', 'look', 'raw'] },
+              sections: ['main', 'type', 'step', 'spec', 'assets', 'shortcuts', 'agent', 'props', 'look', 'raw'] },
   decision: { title: t('editor.kinds.decision'),    icon: '◆', about: t('editor.kinds.decision_about'),
-              sections: ['main', 'step', 'spec', 'props', 'look', 'raw'] },
+              sections: ['main', 'type', 'step', 'spec', 'props', 'look', 'raw'] },
   gateway:  { title: t('editor.kinds.gateway'),    icon: '⬡', about: t('editor.kinds.gateway_about'),
-              sections: ['main', 'gateway', 'step', 'look', 'raw'] },
+              sections: ['main', 'type', 'gateway', 'step', 'look', 'raw'] },
   arrow:    { title: t('editor.kinds.arrow'), icon: '→', about: t('editor.kinds.arrow_about'),
               sections: ['main', 'arrow', 'look', 'raw'] },
   group:    { title: t('editor.kinds.group'),  icon: '▭', about: t('editor.kinds.group_about'),
-              sections: ['main', 'members', 'spec', 'assets', 'shortcuts', 'look', 'raw'] },
+              sections: ['main', 'type', 'members', 'spec', 'assets', 'shortcuts', 'look', 'raw'] },
   area:     { title: t('editor.kinds.area'), icon: '▤', about: t('editor.kinds.area_about'),
-              sections: ['main', 'members', 'spec', 'shortcuts', 'look', 'raw'] },
+              sections: ['main', 'type', 'members', 'spec', 'shortcuts', 'look', 'raw'] },
   note:     { title: t('editor.kinds.note'), icon: '✎', about: t('editor.kinds.note_about'),
-              sections: ['main', 'look', 'raw'] },
+              sections: ['main', 'type', 'look', 'raw'] },
   table:    { title: t('editor.kinds.table'), icon: '▦', about: t('editor.kinds.table_about'),
-              sections: ['main', 'table', 'assets', 'look', 'raw'] },
+              sections: ['main', 'type', 'table', 'assets', 'look', 'raw'] },
 };
 
 /** Ярлык: тематическая связь «это связано вон с тем». В прогоне не участвует. */

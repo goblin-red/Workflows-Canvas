@@ -353,17 +353,27 @@ function folderNoCycle(int $parentId, int $folderId): void
 }
 
 /**
- * POST folder.open {folder} — открыть рабочую папку схемы в Finder.
+ * POST folder.open {folder|parent} — открыть рабочую папку схемы в Finder.
  * Только когда Гоблин стоит на том же Mac, за которым человек (запрос с localhost): в вебе сервер
  * чужой, и окно открылось бы не у человека — там кнопка копирует путь (panel/panel.js).
  */
 function folderOpen(): void
 {
-    $project = requireProject(true);
-    $folder = folderRow((int) inputInt('folder'), (int) $project['id']);
+    $parent = runParentAsked();
+    $project = requireProject($parent === null);
+    $scope = (int) $project['id'];
+    if ($parent === null) {
+        $dir = (string) folderRow((int) inputInt('folder'), $scope)['work_dir'];
+    } else {
+        requireWrite($project);
+        $scene = graphRow('blocks', $scope, $parent);
+    }
     if (agentsRemote() || PHP_OS_FAMILY !== 'Darwin') throw new ApiError(t('server.folder.open_local_only'), 'conflict');
 
-    $dir = (string) $folder['work_dir'];
+    if ($parent !== null) {
+        $path = graphProperties($scene['properties'])['workDir'] ?? '';
+        $dir = nativeWorkPath(is_string($path) ? $path : '', $scope);
+    }
     if ($dir === '' || !is_dir($dir)) throw new ApiError(t('server.folder.open_missing', ['dir' => $dir]), 'not_found');
     exec('open ' . escapeshellarg($dir) . ' 2>&1', $said, $code);
     if ($code !== 0) throw new ApiError(t('server.folder.open_failed', ['why' => implode(' ', $said)]), 'conflict');

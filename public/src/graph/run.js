@@ -29,18 +29,23 @@ function button(text, action, disabled = false, className = 'btn') {
   return node;
 }
 
-async function copyLeaderLink({ project, parent }, feedback) {
+function leaderLink({ project, parent }) {
   const link = new URL('api.php', location.href);
   link.search = new URLSearchParams({ op: 'scheme', project, parent });
+  return link.href;
+}
+
+async function copyLeaderLink(scene, feedback) {
+  const link = leaderLink(scene);
   try {
-    await navigator.clipboard.writeText(link.href);
+    await navigator.clipboard.writeText(link);
     feedback.textContent = t('editor.topbar.run_link_copied');
     feedback.hidden = false;
   } catch {
     const field = element('input', undefined, 'input');
     field.setAttribute('aria-label', tr('leader_link'));
     field.readOnly = true;
-    field.value = link.href;
+    field.value = link;
     feedback.replaceChildren(element('p', t('editor.ai_agent.select_copy')), field);
     feedback.hidden = false;
     field.focus();
@@ -290,6 +295,7 @@ export function mountGraphRun(host, { onPaint, onFocus, readOnly = false }) {
   let lastRefresh = 0;
   const preferences = new Map();
   const collapsedRuns = new Set();
+  const agentNote = document.createComment('');
 
   function selectRun(id) {
     if (id === selected) return;
@@ -308,6 +314,12 @@ export function mountGraphRun(host, { onPaint, onFocus, readOnly = false }) {
     request++;
     loading = writing = false;
     scene = key ? { key, project, parent, legacyFolder, runId } : null;
+    if (scene) {
+      agentNote.data = '\nGoblin run instructions for the current scene (GET):\n' + leaderLink(scene) + '\n';
+      if (!agentNote.parentNode) document.prepend(agentNote);
+    } else {
+      agentNote.remove();
+    }
     runs = [];
     listed = false;
     error = '';

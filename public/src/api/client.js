@@ -3,24 +3,28 @@
    Не делает: не трогает DOM и ничего не решает о данных. */
 
 import { t } from 'goblin/core/i18n.js';
+import { mountCanonicalVisual } from 'goblin/api/canonical-visual.js';
 
 const API = 'api.php';
 let errorHandler = () => {};
+export const canonicalVisual = globalThis.GOBLIN_CANONICAL_VISUAL === true;
+const visual = canonicalVisual ? mountCanonicalVisual({
+  get: rawGet, post: rawPost, batch: rawBatch, upload: rawGraphUpload, projectKey,
+}) : null;
 
 /** Адрес вида #p=КЛЮЧ&f=ПАПКА[&e=НОМЕР][&run=ID]. */
 export function hash() {
-  const out = {};
-  for (const pair of location.hash.replace(/^#/, '').split('&')) {
-    const [key, value] = pair.split('=');
-    if (key) out[key] = decodeURIComponent(value || '');
-  }
-  return out;
+  return Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
 }
 
 export function setHash(patch) {
-  const next = { ...hash(), ...patch };
+  const current = hash();
+  const next = { ...current, ...patch };
+  if (canonicalVisual && Object.hasOwn(patch, 'p') && patch.p !== (current.p || current.s)) {
+    for (const key of ['b', 'a', 'path', 'f', 'e', 'run']) if (!Object.hasOwn(patch, key)) delete next[key];
+  }
   for (const key of Object.keys(next)) if (next[key] === null || next[key] === '') delete next[key];
-  const text = Object.entries(next).map(([k, v]) => `${k}=${v}`).join('&');
+  const text = new URLSearchParams(next).toString();
   history.replaceState(null, '', '#' + text);
 }
 
@@ -43,16 +47,24 @@ export function hasProjectKey() {
 }
 
 export function folderId() {
-  const value = Number(hash().f);
+  const address = hash();
+  const value = Number(canonicalVisual ? address.b || address.f : address.f);
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-export function setFolder(id) { setHash({ f: id }); }
+export function setFolder(id) {
+  if (!canonicalVisual) { setHash({ f: id }); return; }
+  const sameScene = Number(hash().b) === Number(id);
+  setHash({ b: id, f: null, ...(sameScene ? {} : { a: null, path: null }) });
+}
 
 /** Ссылка-задание агенту: по ней сервер соберёт текст задания со ссылками на инструкции.
     role=lead — провести прогон (агент — ведущий), role=draw — нарисовать или поправить схему. */
 export function taskLink(role, folder) {
   const site = location.origin + location.pathname.replace(/[^/]*$/, '');
+  if (canonicalVisual && role === 'lead') {
+    return site + API + '?' + new URLSearchParams({ op: 'scheme', project: projectKey(), parent: folder });
+  }
   return site + API + '?op=docs.run&role=' + role + '&project=' + projectKey() + (folder ? '&folder=' + folder : '');
 }
 
@@ -86,6 +98,10 @@ async function talk(url, options, quiet = []) {
    пустым ключом спрашивают то, что к проекту не привязано, например список
    своих проектов. */
 export function get(op, params = {}, quiet = []) {
+  return visual ? reportVisualError(visual.get(op, params, quiet), quiet) : rawGet(op, params, quiet);
+}
+
+function rawGet(op, params = {}, quiet = []) {
   const fields = clean(params);
   const query = new URLSearchParams({ op, project: fields.project ?? projectKey(), ...fields });
   return talk(`${API}?${query}`, { headers: { Accept: 'application/json' } }, quiet);
@@ -95,6 +111,7 @@ export function get(op, params = {}, quiet = []) {
    лёг сервер, и опрос раз в 3 с сыпал бы «Сервер не ответил». При сбое — null. */
 export async function quietGet(op, params = {}) {
   try {
+    if (visual) return await visual.get(op, params, ['not_found', 'forbidden']);
     const fields = clean(params);
     const query = new URLSearchParams({ op, project: fields.project ?? projectKey(), ...fields });
     const response = await fetch(`${API}?${query}`, { headers: { Accept: 'application/json' } });
@@ -106,6 +123,10 @@ export async function quietGet(op, params = {}) {
 }
 
 export function post(op, body = {}) {
+  return visual ? reportVisualError(visual.post(op, body)) : rawPost(op, body);
+}
+
+function rawPost(op, body = {}) {
   const fields = clean(body);
   return talk(API, {
     method: 'POST',
@@ -133,6 +154,10 @@ export async function postAudio(op, body = {}) {
 /** Пачка правок: всё применяется целиком или не применяется вовсе. */
 export function batch(ops, extra = {}, keepalive = false) {
   if (!ops.length) return Promise.resolve({ ok: true, results: [] });
+  return visual ? reportVisualError(visual.batch(ops, extra, keepalive)) : rawBatch(ops, extra, keepalive);
+}
+
+function rawBatch(ops, extra, keepalive) {
   return talk(API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -144,10 +169,25 @@ export function batch(ops, extra = {}, keepalive = false) {
 
 /** folder — папка схемы, откуда грузят: файл ляжет в её рабочую папку (in/). */
 export function upload(file, link, folder = null) {
+  if (visual) return reportVisualError(visual.upload(file, link, folder));
   const form = new FormData();
   form.append('payload', JSON.stringify({ project: projectKey(), link, ...(folder ? { folder } : {}) }));
   form.append('file[]', file);
   return talk(`${API}?op=asset.upload`, { method: 'POST', body: form });
+}
+
+function rawGraphUpload(file, fields) {
+  const form = new FormData();
+  form.append('payload', JSON.stringify(fields));
+  form.append('file', file);
+  return talk(`${API}?op=graph.asset.upload`, { method: 'POST', body: form });
+}
+
+function reportVisualError(promise, quiet = []) {
+  return promise.catch(error => {
+    if ((error.visual || error.operation) && !quiet.includes(error.code)) errorHandler(error.message, error);
+    throw error;
+  });
 }
 
 function clean(object) {

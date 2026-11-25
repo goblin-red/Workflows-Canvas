@@ -34,6 +34,7 @@ Keep `secrets.php`, databases, configuration overrides, backups and working file
 <p align="center"><img src="docs/wf-agent-roles-and-team.jpg" alt="A lead agent and worker agents running a flowchart" width="80%"></p>
 
 - Choose from 48 starter schemes in **Catalog**, or create a scheme and add work blocks, arrows and files.
+- The editor opens in **Studio**. Use **Type** in a card’s properties to change it to a starter, group, or another compatible type. Switch to **Graph** to work with how projects, folders, and schemes connect.
 - In **Run**, copy the leader link for your terminal agent. Open the run in the editor to see its progress and results.
 - If Jev leaves a decision open, the leader can choose a branch using the condition and previous results.
 - Connect your own terminal agent from the account settings to answer in Canvas chat or edit schemes you authorize.
@@ -59,8 +60,8 @@ Free and open source, from the makers of [GOBL(in)](https://goblin.red):
 
 | App | What it does |
 | --- | --- |
-| [GOBL(in) Remote](https://github.com/goblin-red/Goblin-Remote) | self-hosted remote desktop for macOS in any browser, over cheap PHP hosting |
-| [GOBL(in) Voice](https://github.com/goblin-red/Orca-Voice) | voice control and dictation for Claude Code, Codex and Orca on macOS |
+| [GOBL(in) Voice](https://github.com/goblin-red/Voice-Dictation) | voice control and dictation for Claude Code, Codex and Orca on macOS |
+| [GOBL(in) Remote](https://github.com/goblin-red/Remote-Control) | self-hosted remote desktop for macOS in any browser, over cheap PHP hosting |
 | [GOBL(in) Session Viewer](https://github.com/goblin-red/Session-Viewer) | every Claude Code, Codex, Grok and OpenCode session in one window |
 | [GOBL(in) Drag & Taskbar](https://github.com/goblin-red/Drag-and-Taskbar) | move windows with trackpad gestures, a real taskbar and Alt-Tab for macOS |
 | [GOBL(in) Convert](https://github.com/goblin-red/Photo-Convert) | fast batch JPEG converter and photo resizer for macOS |

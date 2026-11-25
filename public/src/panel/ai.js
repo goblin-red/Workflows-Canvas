@@ -56,7 +56,9 @@ export function initAi() {
   input = document.getElementById('ai-input');
   if (!state.viewOnly) {
     agentControl = mountAiAgent(document.getElementById('ai-agent'), {
-      getTarget: () => state.folder ? { project: api.projectKey(), folder: state.folder.id } : null,
+      getTarget: () => state.folder ? {
+        project: api.projectKey(), [api.canonicalVisual ? 'parent' : 'folder']: state.folder.id,
+      } : null,
     });
     on('ai-agent', agentControl.open);
   }
@@ -120,7 +122,9 @@ function wireTools() {
   };
 
   // Ссылка на разговор: страница chat.php — весь журнал разговора; копируем и сразу открываем.
-  document.getElementById('ai-link').onclick = () => {
+  const chatLink = document.getElementById('ai-link');
+  chatLink.disabled = api.canonicalVisual;
+  chatLink.onclick = () => {
     if (!chatId) { toast(t('editor.ai.ask_first'), true); return; }
     const link = new URL('chat.php?project=' + encodeURIComponent(api.projectKey()) + '&chat=' + chatId, location.href).href;
     navigator.clipboard?.writeText(link).catch(() => {});
@@ -139,6 +143,7 @@ function wireTools() {
     }
   };
   for (const item of scope.querySelectorAll('[data-scope]')) {
+    if (api.canonicalVisual && item.dataset.scope === 'project') item.disabled = true;
     item.onclick = () => { wholeProject = item.dataset.scope === 'project'; drawScope(); };
   }
   drawScope();

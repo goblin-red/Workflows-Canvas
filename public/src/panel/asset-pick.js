@@ -52,7 +52,7 @@ export async function openFolderAssets(element) {
   };
 
   const fileUrl = (folderId, root, file) => `api.php?op=asset.workfile&project=${encodeURIComponent(api.projectKey())}`
-    + `&folder=${folderId}&path=${encodeURIComponent(file.path.slice(root.length + 1))}`;
+    + `&${api.canonicalVisual ? 'parent' : 'folder'}=${folderId}&path=${encodeURIComponent(file.path.slice(root.length + 1))}`;
 
   /* Плитка файла. Один файл бывает в нескольких разделах (общая рабочая папка) —
      отметка ставится на всех его плитках сразу. */

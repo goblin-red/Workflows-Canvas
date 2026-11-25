@@ -39,10 +39,12 @@ export function assetIcon(kind) {
  */
 export function assetUrl(asset) {
   if (!asset || asset.missing) return null;
+  if (api.canonicalVisual && asset.fileUrl) return asset.fileUrl;
   if (asset.agent && asset.uri) return state.folder ? localUrl(state.folder.id, asset.uri) : null;
   if (asset.uri && /^https?:/i.test(asset.uri)) return asset.uri;
   const id = asset.asset || asset.id;
   if (!id) return null;
+  if (api.canonicalVisual && asset._graph?.materialId) return null;
   return `api.php?op=asset.file&project=${encodeURIComponent(api.projectKey())}&asset=${id}`;
 }
 

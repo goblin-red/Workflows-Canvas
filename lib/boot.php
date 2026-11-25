@@ -20,7 +20,7 @@ foreach ([
     'journal/journal.php', 'journal/changes.php',
     'projects/projects.php', 'projects/guests.php',
     'graph/storage.php', 'graph/read.php', 'graph/batch.php', 'graph/guard.php', 'graph/write.php',
-    'graph/placement.php', 'graph/scene.php', 'graph/content.php',
+    'graph/placement.php', 'graph/scene.php', 'graph/content.php', 'graph/visual.php',
     'folders/folders.php', 'folders/scheme.php', 'folders/transfer.php',
     'elements/kinds.php', 'elements/shape.php', 'elements/elements.php',
     'elements/members.php', 'elements/props.php', 'elements/table.php', 'elements/find.php',

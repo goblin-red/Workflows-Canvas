@@ -46,6 +46,9 @@ function graphBlockWrite(array $op, array &$ctx, array $materialStorage = []): a
                 && graphContentJson(json_decode($values['properties'])) !== graphContentJson(json_decode($row['properties'])))) {
             graphGuardBlockChange($scopeId, $id, $isRoot);
         }
+        if ($kind !== $row['kind'] || array_key_exists('properties', $op)) {
+            graphGuardCanvasType($row, $kind, $values['properties']);
+        }
         dbRun('UPDATE blocks SET kind = ?, title = ?, description = ?, properties = ?, appearance = ?, rev = ?
                 WHERE scope_id = ? AND id = ?', [...array_values($values), $rev, $scopeId, $id]);
     }
@@ -56,6 +59,77 @@ function graphGuardBlockChange(int $scope, int $id, bool $isRoot): void
 {
     if ($isRoot) activeGuardProject($scope, t('server.graph.guard_project'));
     else graphGuard($scope, [$id]);
+}
+
+/** Keep active canvas relationships valid when a card changes its type. */
+function graphGuardCanvasType(array $row, string $kind, string $properties): void
+{
+    $previous = $row['kind'];
+    $canvasTypes = ['block', 'decision', 'gateway', 'group', 'area', 'note', 'table'];
+    if (!in_array($previous, $canvasTypes, true) || !in_array($kind, $canvasTypes, true)) return;
+
+    $scope = (int) $row['scope_id'];
+    $id = (int) $row['id'];
+    if ($kind === 'block' && graphCanvasStarter($properties)
+        && ($previous !== 'block' || !graphCanvasStarter($row['properties']))) {
+        graphGuardCanvasStarter($scope, $id);
+    }
+
+    if ($kind === $previous) return;
+    if (canLink($previous) && !canLink($kind) && dbValue(
+        "SELECT id FROM arrows WHERE scope_id = ? AND kind = 'flow' AND (source_id = ? OR target_id = ?) LIMIT 1",
+        [$scope, $id, $id]
+    )) {
+        throw new ApiError(t('server.graph.retype_flow'), 'conflict');
+    }
+    if (isContainer($previous) && !isContainer($kind) && dbValue(
+        "SELECT id FROM arrows WHERE scope_id = ? AND kind = 'contains' AND source_id = ? LIMIT 1",
+        [$scope, $id]
+    )) {
+        throw new ApiError(t('server.graph.retype_members'), 'conflict');
+    }
+    if ($previous !== 'decision') return;
+
+    foreach (dbAll(
+        "SELECT properties FROM arrows WHERE scope_id = ? AND kind = 'flow'
+          AND ((direction = 'forward' AND source_id = ?) OR (direction = 'reverse' AND target_id = ?))",
+        [$scope, $id, $id]
+    ) as $edge) {
+        $p = graphProperties($edge['properties']);
+        $branch = $p['branchKey'] ?? $p['branch'] ?? '';
+        $condition = $p['branchCondition'] ?? $p['condition'] ?? $p['cond'] ?? '';
+        if ((is_string($branch) && !in_array($branch, ['', 'flow'], true))
+            || $condition !== '' || propOn($p['branchDefault'] ?? $p['default'] ?? false)) {
+            throw new ApiError(t('server.graph.retype_branch'), 'conflict');
+        }
+    }
+}
+
+function graphCanvasStarter(string $json): bool
+{
+    $properties = graphProperties($json);
+    $effective = $properties + graphProperties($properties['legacyProps'] ?? null);
+    return propOn($effective['start'] ?? false);
+}
+
+/** Called while the project row is locked. Memberships in frames are not scene placements. */
+function graphGuardCanvasStarter(int $scope, int $id): void
+{
+    $siblings = dbAll(
+        "SELECT DISTINCT b.id, b.properties FROM arrows p
+          JOIN blocks parent ON parent.scope_id = p.scope_id AND parent.id = p.source_id
+          JOIN arrows peer ON peer.scope_id = p.scope_id AND peer.source_id = p.source_id AND peer.kind = 'contains'
+          JOIN blocks b ON b.scope_id = p.scope_id AND b.id = peer.target_id AND b.kind = 'block'
+         WHERE p.scope_id = ? AND p.target_id = ? AND p.kind = 'contains'
+           AND parent.kind IN ('project', 'folder', 'scheme') AND b.id <> ? ORDER BY b.id",
+        [$scope, $id, $id]
+    );
+    foreach ($siblings as $sibling) {
+        if (!graphCanvasStarter($sibling['properties'])) continue;
+        $p = graphProperties($sibling['properties']);
+        $no = (int) ($p['no'] ?? $p['legacyNo'] ?? $sibling['id']);
+        throw new ApiError(t('server.props.starter_exists', ['no' => $no]), 'conflict');
+    }
 }
 
 /** Keep server-owned material fields when clients replace the public property object. */

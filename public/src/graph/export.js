@@ -54,35 +54,7 @@ function exportStyles() {
   return styles.join('\n') + EXPORT_CSS;
 }
 
-async function imageData(src) {
-  const url = new URL(src, location.href);
-  if (url.origin !== location.origin || url.searchParams.get('op') !== 'graph.asset.file') return '';
-  const response = await fetch(url, {credentials: 'same-origin'});
-  if (!response.ok) return '';
-  const image = await response.blob();
-  if (!/^image\/(png|jpeg|gif|webp|bmp|avif)$/i.test(image.type)) return '';
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(image);
-  });
-}
-
-async function embedCovers(frame) {
-  const images = new Map();
-  await Promise.all([...frame.querySelectorAll('.graph-card-cover[src]')].map(async image => {
-    const src = image.getAttribute('src');
-    if (!images.has(src)) images.set(src, imageData(src).catch(() => ''));
-    image.removeAttribute('src');
-    image.removeAttribute('loading');
-    const value = await images.get(src);
-    if (value) image.src = value;
-    else image.remove();
-  }));
-}
-
-async function exportPicture({scene, style, skin, title, vector}) {
+function exportPicture({scene, style, title, vector}) {
   const plain = style === 'flat';
   const host = document.createElement('div');
   Object.assign(host.style, {position: 'fixed', inset: '0 auto auto -10000px', width: '1px', height: '1px'});
@@ -91,7 +63,6 @@ async function exportPicture({scene, style, skin, title, vector}) {
   const canvas = mountGraphCanvas(host, {readOnly: true, snapshot: true});
   let snapshot;
   try {
-    canvas.setSkin(plain ? 'graph' : skin);
     canvas.render({...scene, selection: [], tool: 'select', runPaint: plain ? null : scene.runPaint});
     snapshot = canvas.exportFrame(vector);
   } finally {
@@ -101,7 +72,6 @@ async function exportPicture({scene, style, skin, title, vector}) {
   if (!snapshot) throw new Error(t('editor.files.nothing_to_save'));
   if (vector) return snapshot;
   const {frame, width, height} = snapshot;
-  await embedCovers(frame);
   const body = document.createElement('body');
   body.classList.toggle('graph-export-flat', plain);
   body.classList.toggle('no-grid', plain || document.body.classList.contains('no-grid'));
@@ -190,9 +160,9 @@ async function drawVectorPdf(page, doc, library, picture, scale) {
   picture.cards.filter(card => !zone(card)).forEach(drawCard);
 }
 
-export async function saveGraphPicture({format, style, skin, title = t('editor.files.scheme_title'), scene}) {
+export async function saveGraphPicture({format, style, title = t('editor.files.scheme_title'), scene}) {
   const pdf = format === 'pdf', vector = pdf && style === 'flat';
-  const picture = await exportPicture({scene, style, skin, title, vector});
+  const picture = exportPicture({scene, style, title, vector});
   const name = (title || t('editor.files.scheme_file')).replace(/[\\/:*?"<>|\x00-\x1f]/g, '_');
   const file = name + (style === 'color' ? '-color' : '') + '.' + format;
   let content;

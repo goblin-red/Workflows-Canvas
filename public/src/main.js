@@ -68,7 +68,7 @@ window.addEventListener('beforeunload', (event) => {
 
 window.addEventListener('hashchange', () => {
   const wanted = api.folderId();
-  if (wanted && wanted !== state.folder?.id) loadFolder(wanted);
+  if (wanted && wanted !== state.folder?.id) loadFolder();
 });
 
 (async function start() {

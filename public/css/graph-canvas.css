@@ -399,102 +399,6 @@ body.no-grid .graph-canvas::before,
   line-height: 1.05;
 }
 
-/* Виды карточек используют правила LOOKS, положение и размеры остаются общими. */
-.graph-skin-uppercase .graph-card-title:not(:focus-within, [contenteditable]:not([contenteditable="false"])) {
-  text-transform: uppercase;
-  letter-spacing: .03em;
-}
-
-.graph-canvas[data-skin-hide~="desc"] .graph-card .graph-card-description:not(:focus-within, [contenteditable]:not([contenteditable="false"])),
-.graph-canvas[data-skin-hide~="badges"] .graph-card :is(.graph-card-type, .graph-card-count, .graph-card-summary,
-  .graph-card-material, .graph-card-material-names),
-.graph-canvas[data-skin-hide~="result"] .graph-card-result,
-.graph-canvas[data-skin="graph"] :is(.graph-card-cover, .graph-card-details, .graph-card-result),
-.graph-canvas-overview :is(.graph-card-cover, .graph-card-details, .graph-card-result) { display: none; }
-
-.graph-card-cover {
-  display: block;
-  width: 100%;
-  height: clamp(26px, 42%, 116px);
-  margin-block-start: 5px;
-  object-fit: cover;
-  border-radius: var(--r-sm);
-  pointer-events: none;
-}
-
-.graph-card-details {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-block-start: 6px;
-  overflow: hidden;
-  font: var(--f-xs)/1.25 var(--mono);
-  color: var(--graph-card-dim, var(--ink-dim));
-}
-
-.graph-card-details > span, .graph-card-result {
-  padding: 2px 5px;
-  overflow: hidden;
-  border-radius: 4px;
-  background: var(--surface-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.graph-card-details [data-detail="md"] { color: var(--ok); }
-.graph-card-result {
-  margin-block-start: 5px;
-  background: color-mix(in srgb, var(--graph-run-color) 13%, var(--surface));
-  color: var(--graph-run-color);
-  font: var(--f-xs)/1.3 var(--mono);
-}
-
-.graph-canvas[data-skin="dev"] .graph-card-details { color: var(--graph-card-ink, var(--ink)); }
-.graph-canvas[data-skin="lead"] .graph-card-title { font-weight: 700; }
-.graph-canvas[data-skin="design"] .graph-card-cover { height: clamp(28px, 58%, 170px); }
-.graph-canvas[data-skin="show"] .graph-card-cover { height: clamp(28px, 74%, 230px); }
-.graph-canvas[data-skin="show"] .graph-card-shell { box-shadow: none; }
-
-.graph-canvas:is([data-skin="minimal"], [data-skin="mobile"]) .graph-card:not([data-kind="area"], [data-kind="group"]) .graph-card-inner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-
-.graph-canvas[data-skin="mobile"] .graph-card:not([data-starter]) .graph-card-title { font-weight: 700; }
-
-.graph-canvas[data-skin="studio"] .graph-card:not([data-kind="decision"], [data-starter]) .graph-card-shell {
-  border-width: 1px;
-  border-radius: 12px;
-}
-
-.graph-canvas[data-skin="studio"] .graph-card[data-kind="gateway"]:not([data-starter]) .graph-card-shell { border-radius: 999px; }
-.graph-canvas[data-skin="studio"]:not(.graph-canvas-overview) .graph-card:not([data-kind="decision"], [data-starter]) .graph-card-inner {
-  padding: 8px 12px;
-}
-
-.graph-canvas[data-skin="studio"]:not(.graph-canvas-overview) .graph-card:not([data-kind="decision"], [data-kind="gateway"], [data-starter]) .graph-card-title {
-  position: relative;
-  margin-inline: -12px;
-  padding: 4px 12px 8px 25px;
-  border-bottom: 1px solid color-mix(in srgb, var(--ink-faint) 28%, transparent);
-  background: color-mix(in srgb, var(--ink-faint) 18%, transparent);
-  font-size: 13px;
-}
-
-.graph-canvas[data-skin="studio"]:not(.graph-canvas-overview) .graph-card:not([data-kind="decision"], [data-kind="gateway"], [data-starter]) .graph-card-title::before {
-  content: "";
-  position: absolute;
-  inset-block-start: 9px;
-  inset-inline-start: 12px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--graph-run-color, var(--graph-card-outline, var(--ink-faint)));
-}
-
 .graph-card[data-starter] { --graph-starter-color: var(--ok); }
 .graph-card[data-starter] .graph-card-shell {
   border-radius: 50%;
@@ -521,7 +425,7 @@ body.no-grid .graph-canvas::before,
 
 .graph-card-starter::after { content: "▶"; display: block; margin-block: 4px; font: 20px/1 var(--sans); }
 .graph-card[data-starter][data-run-step="accepted"] .graph-card-starter::after { content: "✓"; }
-.graph-card[data-starter] :is(.graph-card-cover, .graph-card-details, .graph-card-result, .graph-card-summary,
+.graph-card[data-starter] :is(.graph-card-summary,
   .graph-card-material, .graph-card-material-names),
 .graph-card[data-starter] .graph-card-description:not(:focus-within, [contenteditable]:not([contenteditable="false"])) { display: none; }
 .graph-canvas-overview .graph-card-starter { display: none; }

@@ -84,6 +84,12 @@ function specFlags(int $folderId): array
 function folderEmbed(): void
 {
     $project = requireProject(false);
+    $parent = runParentAsked();
+    if ($parent !== null) {
+        graphRow('blocks', (int) $project['id'], $parent);
+        $signature = hash_hmac('sha256', 'goblin-embed-v3:' . $parent, (string) $project['url_key']);
+        reply(['source' => 'embed.php?parent=' . $parent . '&signature=' . $signature]);
+    }
     $folder = folderRow(inputInt('folder'), (int) $project['id']);
     $folderId = (int) $folder['id'];
     $signature = hash_hmac('sha256', 'goblin-embed-v1:' . $folderId, (string) $project['url_key']);

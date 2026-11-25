@@ -256,7 +256,7 @@ function fileSend(string $path, string $name, string $mime): void
 function assetWorkfiles(): void
 {
     $project = requireProject(false);
-    $folder = folderRow((int) inputInt('folder'), (int) $project['id']);
+    $folder = workfileFolder((int) $project['id'], false);
     $dir = pathInsideRoots((string) $folder['work_dir']);
     if (!$dir || !is_dir($dir)) reply(['files' => [], 'dir' => (string) $folder['work_dir']]);
 
@@ -306,7 +306,7 @@ function workServicePath(string $path, string $dir): bool
 function workfileTarget(bool $forWrite): array
 {
     $project = requireProject($forWrite);
-    $folder = folderRow((int) inputInt('folder'), (int) $project['id']);
+    $folder = workfileFolder((int) $project['id'], $forWrite);
     $dir = pathInsideRoots((string) $folder['work_dir']);
     if (!$dir || !is_dir($dir)) throw new ApiError(t('server.file.no_work_dir'), 'not_found');
 
@@ -316,6 +316,17 @@ function workfileTarget(bool $forWrite): array
         throw new ApiError(t('server.file.no_such_file'), 'not_found');
     }
     return [$project, $folder, $path];
+}
+
+function workfileFolder(int $projectId, bool $forWrite): array
+{
+    $parent = runParentAsked();
+    if ($parent === null) return folderRow((int) inputInt('folder'), $projectId);
+    if ($forWrite) throw new ApiError(t('server.batch.classic_schema_retired'), 'conflict');
+    $block = graphRow('blocks', $projectId, $parent);
+    $props = graphProperties($block['properties']);
+    $path = is_string($props['workDir'] ?? null) ? $props['workDir'] : '';
+    return ['id' => $parent, 'work_dir' => nativeWorkPath($path, $projectId)];
 }
 
 /**

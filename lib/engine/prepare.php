@@ -22,6 +22,12 @@ declare(strict_types=1);
  */
 function runPrepare(): void
 {
+    $parent = runParentAsked();
+    if ($parent !== null) {
+        reply(runPrepareNative($parent));
+        return;
+    }
+
     $project = requireProject(true);
     $projectId = (int) $project['id'];
 
@@ -43,6 +49,41 @@ function runPrepare(): void
         $out['prepared']['filesCleaned'] = workDirClean((string) $folder['work_dir'], (int) $folder['id']);
     }
     reply($out);
+}
+
+/** Скрыть подсветку завершённых прогонов сцены, сохранив историю и материалы. */
+function runPrepareNative(int $parent): array
+{
+    $project = requireProject(false);
+    requireWrite($project);
+    $scope = (int) $project['id'];
+
+    return engineLocked($scope, static function () use ($scope, $parent): array {
+        $project = requireProject(false);
+        requireWrite($project);
+        $scene = graphRow('blocks', $scope, $parent);
+        if ($scene['kind'] === 'project') requireOwner($project);
+        $legacyFolder = graphSceneLegacyFolder($scope, graphBlockShape($scene));
+        if (nativeActive($scope, $parent) || ($legacyFolder !== null && runActive($legacyFolder))) {
+            throw new ApiError(ta('agents.prepare.stop_first'), 'conflict');
+        }
+        graphGuard($scope, [$parent]);
+
+        // У перенесённой сцены на холсте могут быть видны и прежние прогоны папки.
+        $last = dbRow('SELECT id, `no` FROM runs WHERE project_id = ? AND (parent_block_id = ? OR folder_id = ?)
+                       ORDER BY id DESC LIMIT 1', [$scope, $parent, $legacyFolder]);
+        $preparedRun = (int) ($last['id'] ?? 0);
+        $properties = (object) json_decode($scene['properties'], false, 512, JSON_THROW_ON_ERROR);
+        $properties->preparedRun = $preparedRun;
+        $rev = bumpRev($scope);
+        dbRun('UPDATE blocks SET properties = ?, rev = ? WHERE scope_id = ? AND id = ?',
+            [json_encode($properties, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), $rev, $scope, $parent]);
+
+        return ['parent' => $parent, 'rev' => $rev, 'prepared' => [
+            'runsHidden' => $preparedRun, 'runsHiddenNo' => (int) ($last['no'] ?? 0),
+            'coversDropped' => 0, 'linksDropped' => 0, 'filesCleaned' => null,
+        ]];
+    });
 }
 
 /**

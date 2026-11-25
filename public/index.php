@@ -13,9 +13,10 @@ if (installNeeded()) {
     exit;
 }
 
-if (!empty(config()['graph_editor'])) {
+$canonicalVisual = !empty(config()['graph_editor']);
+if ($canonicalVisual && ($_GET['skin'] ?? '') === 'graph') {
     require __DIR__ . '/graph.php';
     return;
 }
 
-renderEditor(isset($_GET['view']));
+renderEditor(isset($_GET['view']), $canonicalVisual);

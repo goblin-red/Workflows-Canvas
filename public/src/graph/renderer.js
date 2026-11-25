@@ -1,7 +1,6 @@
 import { pickSides, portPoint } from 'goblin/canvas/geometry-legacy.js';
 import { route, pathOf } from 'goblin/canvas/routing.js';
 import { edgeColor, inkFor, paintOf } from 'goblin/canvas/palette.js';
-import { SKINS } from 'goblin/canvas/looks.js';
 import { arrowHeads } from 'goblin/graph/model.js';
 import { t } from 'goblin/core/i18n.js';
 import { STEP_WORDS, stepMark } from 'goblin/core/kinds.js';
@@ -16,7 +15,6 @@ const EDGE_PAINT_STATES = new Set(['lit', 'done', 'live']);
 const CONTAINERS = new Set(['project', 'folder', 'scheme', 'group']);
 const CONTAINER_SIZES = new Map([['project', [300, 150]], ['folder', [260, 135]], ['scheme', [230, 125]]]);
 const MATERIALS = new Set(['asset', 'material']);
-const RASTER_MIME = /^image\/(?:png|jpeg|gif|webp|bmp|avif)$/i;
 const STARTER_LABEL = t('editor.panel.starter_caps');
 const CONTENT_LIMIT = 6;
 const EMPTY_SUMMARY = Object.freeze({
@@ -59,12 +57,6 @@ function materialType(block) {
   if (kind === 'image' || text(mime).startsWith('image/')) return CARD_WORDS.image;
   if (kind === 'text' || text(mime).startsWith('text/markdown')) return 'Markdown';
   return kind === 'file' || mime ? CARD_WORDS.file : CARD_WORDS.material;
-}
-
-function imageMaterial(block) {
-  if (!MATERIALS.has(block?.kind)) return false;
-  const {mime, kind} = block.properties ?? {};
-  return mime ? RASTER_MIME.test(mime) : kind === 'image';
 }
 
 function cardSummary(block, preview, linkedMaterials) {
@@ -240,7 +232,6 @@ export function mountGraphCanvas(host, handlers = {}) {
   let parent, runPaint = null, selection = new Set(), tool = 'select', connectSource = null;
   let camera = {x: 32, y: 24, zoom: 1}, cameraDirty = true, edgesDirty = true, lastZoom;
   let renderFrame = null, gesture = null, pending = null, skipClick = false;
-  let skinRules, skinVersion = 0, arrowTitles = true;
   const touches = new Map();
   let pinch = null, multiTouch = false;
   let size = {width: viewport.clientWidth, height: viewport.clientHeight};
@@ -251,25 +242,10 @@ export function mountGraphCanvas(host, handlers = {}) {
     schedule();
   });
   observer.observe(viewport);
-  setSkin('graph');
+  schedule();
 
   function schedule() {
     if (renderFrame === null && !controller.signal.aborted) renderFrame = requestAnimationFrame(draw);
-  }
-
-  function setSkin(id) {
-    const skin = Object.hasOwn(SKINS, id) ? id : 'graph';
-    if (viewport.dataset.skin === skin) return;
-    const {show, uppercase} = SKINS[skin];
-    viewport.dataset.skin = skin;
-    viewport.dataset.skinHide = Object.keys(show ?? {}).filter(key => show[key] === false).join(' ');
-    viewport.classList.toggle('graph-skin-uppercase', Boolean(uppercase));
-    skinRules = show;
-    skinVersion++;
-    const nextArrowTitles = show?.arrowTitle !== false;
-    if (arrowTitles !== nextArrowTitles) edgesDirty = true;
-    arrowTitles = nextArrowTitles;
-    schedule();
   }
 
   function invalidate(card) {
@@ -277,8 +253,7 @@ export function mountGraphCanvas(host, handlers = {}) {
     for (const id of incident.get(card.id) ?? []) dirtyRoutes.add(id);
   }
 
-  function render({parentId, project, blocks, placements, arrows, selection: nextSelection, tool: nextTool, runPaint: nextPaint = null, previews = {}}) {
-    skinVersion++;
+  function render({parentId, blocks, placements, arrows, selection: nextSelection, tool: nextTool, runPaint: nextPaint = null, previews = {}}) {
     // Снимок покраски может прийти до подтверждения записи позиции.
     const paintChanged = parent === parentId && nextPaint !== runPaint;
     runPaint = nextPaint;
@@ -299,20 +274,16 @@ export function mountGraphCanvas(host, handlers = {}) {
     tool = nextTool;
     selection = new Set(nextSelection);
     const byBlock = new Map(blocks.map(block => [block.id, block]));
-    const attachments = new Map(), agents = new Map();
+    const attachments = new Map();
     for (const row of arrows) {
-      if (row.kind !== 'link') continue;
+      if (row.kind !== 'link' || row.properties?.relation !== 'asset') continue;
       const target = byBlock.get(row.targetId);
-      if (row.properties?.relation === 'agent') agents.set(row.sourceId, summaryText(target?.title));
-      if (row.properties?.relation !== 'asset') continue;
       if (!attachments.has(row.sourceId)) attachments.set(row.sourceId, new Map());
       const items = attachments.get(row.sourceId);
       const linked = items.get(row.targetId);
       items.set(row.targetId, {
         title: summaryText(target?.title ?? target?.properties?.originalName),
         cover: row.properties.role === 'cover' || Boolean(linked?.cover),
-        spec: row.properties.role === 'spec' || Boolean(linked?.spec),
-        image: imageMaterial(target),
       });
     }
     const active = new Map();
@@ -335,13 +306,8 @@ export function mountGraphCanvas(host, handlers = {}) {
       card.kind = block.kind;
       card.title = block.title || (MATERIALS.has(block.kind) ? summaryText(block.properties?.originalName) : '');
       card.description = MATERIALS.has(block.kind) ? '' : block.description ?? '';
-      const related = attachments.get(blockId);
-      card.block = block;
       card.starter = card.kind === 'block' && (block.properties?.start === true || block.properties?.legacyProps?.start === true);
-      card.project = project;
-      card.agent = agents.get(blockId) ?? '';
-      card.attachments = related;
-      const summary = cardSummary(block, previews?.[blockId], related);
+      const summary = cardSummary(block, previews?.[blockId], attachments.get(blockId));
       const summaryKey = summary === EMPTY_SUMMARY ? '' : JSON.stringify(summary);
       if (card.summaryKey !== summaryKey) {
         card.summary = summary;
@@ -396,7 +362,7 @@ export function mountGraphCanvas(host, handlers = {}) {
         edge.labelRows = wrapLabel(label);
         edge.labelWidth = Math.max(0, ...edge.labelRows.map(row => row.length * LABEL_SIZE));
       }
-      Object.assign(edge, {from, to, appearance, direction: row.direction, branch, branchLabel, back, look});
+      Object.assign(edge, {from, to, appearance, direction: row.direction, branch, back, look});
       edges.set(row.id, edge);
       family.push(edge);
       for (const id of [from.id, to.id]) {
@@ -505,8 +471,7 @@ export function mountGraphCanvas(host, handlers = {}) {
       const visible = nearLabel || (intersects(path.bounds, pathArea) && path.segments.some(segment => intersects(segment, pathArea)));
       const mounted = edgeViews.get(id);
       if (visible) {
-        if (mounted?.edge !== edge || mounted.route !== path || mounted.visualVersion !== edge.visualVersion ||
-            mounted.arrowTitles !== arrowTitles) updateEdge(edge);
+        if (mounted?.edge !== edge || mounted.route !== path || mounted.visualVersion !== edge.visualVersion) updateEdge(edge);
       } else if (mounted) {
         mounted.node.remove();
         edgeViews.delete(id);
@@ -606,17 +571,12 @@ export function mountGraphCanvas(host, handlers = {}) {
     }
     node.classList.toggle('graph-card-source', connectSource === card.blockId);
     node.classList.toggle('graph-card-dragging', gesture?.card === card && gesture.moved);
-    if (view.skinVersion !== skinVersion) {
-      updateSkinDetails(view, card);
-      view.skinVersion = skinVersion;
-    }
+    if (view.isStarter !== card.starter) markStarter(view, card.starter);
     paintCard(view, card);
   }
 
-  function updateSkinDetails(view, card) {
-    const {block, attachments, starter} = card;
-    const props = block.properties ?? {};
-    const legacy = props.legacyProps ?? {};
+  function markStarter(view, starter) {
+    view.isStarter = starter;
     view.node.toggleAttribute('data-starter', starter);
     if (starter && !view.starter) {
       view.starter = div('graph-card-starter');
@@ -624,55 +584,6 @@ export function mountGraphCanvas(host, handlers = {}) {
       view.inner.prepend(view.starter);
     }
     if (view.starter) view.starter.hidden = !starter;
-    if (!skinRules) return;
-
-    const related = [...(attachments?.entries() ?? [])];
-    const cover = related.find(([, item]) => item.cover && item.image)?.[0] ?? (imageMaterial(block) ? block.id : null);
-    const picture = skinRules.cover && !starter && card.project && cover
-      ? 'api.php?' + new URLSearchParams({op: 'graph.asset.file', project: card.project, material: cover}) : '';
-    if (view.picture !== picture) {
-      if (picture && !view.cover) {
-        view.cover = document.createElement('img');
-        Object.assign(view.cover, {className: 'graph-card-cover', alt: '', loading: 'lazy', decoding: 'async', draggable: false});
-        view.cover.addEventListener('error', () => { view.cover.hidden = true; });
-        view.description.after(view.cover);
-      }
-      if (view.cover) {
-        view.cover.hidden = !picture;
-        if (picture) view.cover.src = picture;
-        else view.cover.removeAttribute('src');
-      }
-      view.picture = picture;
-    }
-
-    const details = [];
-    if (skinRules.seq && props.legacyNo) details.push(['seq', `№ ${props.legacyNo}`]);
-    if (skinRules.id) details.push(['id', `#${block.id}`]);
-    if (skinRules.md && (related.some(([, item]) => item.spec) ||
-        (Array.isArray(props.content) && props.content.some(field => field?.kind === 'markdown')))) details.push(['md', 'MD']);
-    if (skinRules.agent && card.agent) details.push(['agent', card.agent]);
-    if (skinRules.props) {
-      for (const [key, value] of Object.entries(legacy).filter(([key, value]) => key !== 'start' &&
-          ['boolean', 'number', 'string'].includes(typeof value)).slice(0, 2)) {
-        details.push(['prop', summaryText(`${key}: ${value}`)]);
-      }
-    }
-    const key = JSON.stringify(details);
-    if (view.detailsKey === key) return;
-    if (details.length && !view.details) {
-      view.details = div('graph-card-details');
-      view.inner.append(view.details);
-    }
-    if (view.details) {
-      view.details.hidden = !details.length;
-      view.details.replaceChildren(...details.map(([kind, value]) => {
-        const chip = document.createElement('span');
-        chip.dataset.detail = kind;
-        chip.textContent = value;
-        return chip;
-      }));
-    }
-    view.detailsKey = key;
   }
 
   function paintCard(view, card) {
@@ -697,14 +608,6 @@ export function mountGraphCanvas(host, handlers = {}) {
       lap > 1 ? t('editor.canvas.round_n', {n: lap}) : '',
       detail,
     ].filter(Boolean).join(' · ') : '';
-    if (detail && !view.result) {
-      view.result = div('graph-card-result');
-      view.inner.append(view.result);
-    }
-    if (view.result) {
-      view.result.hidden = !detail;
-      view.result.textContent = summaryText(detail);
-    }
     Object.assign(view, {runStep: state, runWait: wait, runLap: lap, runKind: card.kind, runDetail: detail});
   }
 
@@ -734,16 +637,15 @@ export function mountGraphCanvas(host, handlers = {}) {
       view.anchor.setAttribute('transform', `translate(${x} ${y})`);
       view.point = edge.route.label;
     }
-    const label = arrowTitles ? edge.label : edge.branchLabel;
-    if (view.label !== label || view.hint !== edge.label) {
-      const rows = arrowTitles ? edge.labelRows : wrapLabel(label);
+    if (view.label !== edge.label) {
+      const rows = edge.labelRows;
       view.tooltip.textContent = edge.label;
       view.text.replaceChildren(...rows.map((row, index) => {
         const line = svg('tspan', {x: 0, y: (index - (rows.length - 1) / 2) * 13});
         line.textContent = row;
         return line;
       }));
-      Object.assign(view, {label, hint: edge.label, labelRows: rows.length});
+      Object.assign(view, {label: edge.label, labelRows: rows.length});
     }
     if (view.direction !== edge.direction) {
       const heads = arrowHeads(edge.direction);
@@ -763,12 +665,13 @@ export function mountGraphCanvas(host, handlers = {}) {
       view.color = color;
     }
     if (view.width !== width) {
-      view.node.style.setProperty('--graph-arrow-width', bounded(finite(width, 2), .5, 16));
+      const customWidth = finite(width, null);
+      view.node.style.setProperty('--graph-arrow-width', customWidth === null ? '' : bounded(customWidth, .5, 16));
       view.width = width;
     }
     view.line.classList.toggle('graph-arrow-dashed', Boolean(dash || back || edge.back));
     paintEdge(view, edge);
-    Object.assign(view, {edge, route: edge.route, visualVersion: edge.visualVersion, arrowTitles});
+    Object.assign(view, {edge, route: edge.route, visualVersion: edge.visualVersion});
   }
 
   function paintEdge(view, edge) {
@@ -1051,5 +954,5 @@ export function mountGraphCanvas(host, handlers = {}) {
     if (staticHost) host.classList.remove('graph-canvas-host');
   }
 
-  return {render, setSkin, fit, destroy, exportFrame: handlers.snapshot ? exportFrame : undefined};
+  return {render, fit, destroy, exportFrame: handlers.snapshot ? exportFrame : undefined};
 }

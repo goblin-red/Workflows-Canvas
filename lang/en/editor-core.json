@@ -68,5 +68,6 @@
  "editor.variants.run_about": "watch how the work goes: steps, results, time",
  "editor.main.edit_failed": "The edit failed, reloading the folder",
  "editor.api.no_answer": "The server did not respond",
- "editor.api.refused": "The server refused"
+ "editor.api.refused": "The server refused",
+ "editor.api.visual_unsupported": "This action is unavailable for workflows in the new format"
 }

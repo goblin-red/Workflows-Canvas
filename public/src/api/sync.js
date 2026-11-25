@@ -56,7 +56,7 @@ export async function loadProject() {
   state.me = answer.me || null;       // кто вошёл: кнопка входа в шапке
   // Гость — запомнить проект первым в списке; вошёл — отдать запомненные ему (сервер заберёт их к нему).
   if (!state.me) guestSave([answer.project.key, ...guestKeys().filter((key) => key !== answer.project.key)]);
-  else if (guestKeys().length) loadMine(true).then(() => guestSave([]));
+  else if (!api.canonicalVisual && guestKeys().length) loadMine(true).then(() => guestSave([]));
   state.folders.length = 0;
   state.folders.push(...answer.folders);
   state.agents = answer.agents || [];
@@ -78,13 +78,17 @@ export async function loadMine(force = false) {
 }
 
 export async function loadFolder(id) {
-  const folderId = id || api.folderId() || state.folders[0]?.id;
+  const folderId = id || api.folderId()
+    || (api.canonicalVisual ? state.project?.defaultParentId : state.folders[0]?.id);
   if (!folderId) return null;
 
   const turn = ++folderTurn;
   const projectKey = api.projectKey();
-  const answer = await api.get('folder.get', { folder: folderId });
+  const address = api.hash();
+  const legacyFolder = api.canonicalVisual && !id && !address.b && address.f ? folderId : undefined;
+  const answer = await api.get('folder.get', { folder: legacyFolder ? undefined : folderId, legacyFolder });
   if (turn !== folderTurn || api.projectKey() !== projectKey) return null;
+  if (!answer.folder) return null;
   // Открыли другую папку — отменять там нечего: прошлое осталось в прежней.
   if (state.folder && state.folder.id !== answer.folder.id) {
     clearHistory();
@@ -93,6 +97,7 @@ export async function loadFolder(id) {
     if (state.selection.size) { state.selection.clear(); emit('selection'); }
   }
   state.folder = answer.folder;
+  if (api.canonicalVisual) state.rev = Math.max(state.rev, answer.rev);
   api.setFolder(answer.folder.id);
   setScheme(answer.scheme);
   emit('folder');
@@ -188,6 +193,12 @@ export function startPolling() {
     state.rev = answer.rev;
     const changed = answer.changed || {};
     let rereadRuns = !!changed.runs;
+    if (changed.visual) {
+      const present = new Set(changed.folders.map(folder => folder.id));
+      for (let index = state.folders.length - 1; index >= 0; index--) {
+        if (!present.has(state.folders[index].id)) state.folders.splice(index, 1);
+      }
+    }
 
     for (const folder of changed.folders || []) {
       const known = state.folders.findIndex((f) => f.id === folder.id);

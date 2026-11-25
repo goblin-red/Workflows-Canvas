@@ -9,9 +9,9 @@
    и папка с проектом. Управление собирается из panel/parts.js,
    материалы рисует panel/assets-view.js. */
 
-import { state, on, emit, stepOf } from 'goblin/core/state.js';
-import { kindOf, iconOf, sectionsOf, STEP_WORDS } from 'goblin/core/kinds.js';
-import { membersOf, isCollapsed } from 'goblin/core/containers.js';
+import { state, on, emit, stepOf, arrowsOf } from 'goblin/core/state.js';
+import { KINDS, kindOf, iconOf, sectionsOf, canLink, STEP_WORDS } from 'goblin/core/kinds.js';
+import { membersOf, isCollapsed, isContainer } from 'goblin/core/containers.js';
 import * as scene from 'goblin/edit/scene.js';
 import * as api from 'goblin/api/client.js';
 import { toggleCollapse, ungroupSelected } from 'goblin/edit/grouping.js';
@@ -176,6 +176,7 @@ function showSections(element) {
 
     const was = shown.get(name);
     const fresh = build(element);
+    if (!fresh) continue;
     // Имя секции — на узле: мобильный скин по нему прячет вторичное (css/mobile.css).
     fresh.dataset.section = name;
     const stamp = stampOf(fresh);
@@ -270,6 +271,68 @@ function titleInput(element) {
   return node;
 }
 
+const cardTypes = ['block', 'group', ...Object.keys(KINDS).filter(type => !['block', 'group', 'arrow'].includes(type))];
+
+function changeType(element, choice) {
+  const start = choice === 'starter';
+  const type = start ? 'block' : choice;
+  const changes = {};
+  if (type !== element.type) changes.type = type;
+  if (start !== Boolean(element.props?.start)) changes.props = { start: start || null };
+  if (changes.type && element.style?.collapsed) changes.style = { collapsed: null };
+  if (start) {
+    const side = Math.max(120, Math.min(element.style?.width ?? 160, element.style?.height ?? 160));
+    changes.style = { ...changes.style, width: side, height: side };
+    if (element.agent) changes.agent = null;
+  }
+  if (Object.keys(changes).length) scene.patch(element.id, changes);
+}
+
+function typeSection(element) {
+  // Материалы и служебные блоки могут выглядеть как карточки, но у них свой тип в Graph.
+  if (element._graph && !cardTypes.includes(element._graph.kind)) return null;
+  const types = api.canonicalVisual ? cardTypes : element.type === 'block' ? ['block'] : ['group', 'area'];
+  if (!types.includes(element.type)) return null;
+  const choices = types.includes('block') ? ['block', 'starter', ...types.filter(type => type !== 'block')] : types;
+  const current = element.type === 'block' && element.props?.start ? 'starter' : element.type;
+  const other = [...state.elements.values()].find(one => one.id !== element.id && one.type === 'block' && one.props?.start);
+  const arrows = arrowsOf(element.id);
+  const hasBranches = element.type === 'decision' && arrows.some(arrow => {
+    if (arrow.from !== element.id) return false;
+    const props = arrow._graph?.properties ?? arrow.props ?? {};
+    return (arrow.branch && arrow.branch !== 'flow') || (props.branchCondition ?? props.condition ?? props.cond)
+      || [true, 1, '1', 'true', 'yes'].includes(props.branchDefault ?? props.default);
+  });
+  const hasMembers = isContainer(element) && membersOf(element.id).length > 0;
+  const select = el('select', 'input');
+  const title = t('editor.panel.type');
+  const hints = new Set();
+  select.setAttribute('aria-label', title);
+  select.disabled = state.viewOnly;
+  for (const choice of choices) {
+    const type = choice === 'starter' ? 'block' : choice;
+    const label = choice === 'starter' ? t('editor.panel.starter') : KINDS[type].title;
+    const option = new Option(label[0].toLocaleUpperCase() + label.slice(1), choice);
+    if (choice !== current) {
+      let reason = '';
+      if (choice === 'starter' && other) reason = t('editor.panel.starter_exists', { no: other.no });
+      else if (hasMembers && !isContainer({ type })) reason = t('editor.panel.type_members');
+      else if (hasBranches && type !== 'decision') reason = t('editor.panel.type_branches');
+      else if (canLink(element.type) && arrows.length && !canLink(type)) reason = t('editor.panel.type_arrows');
+      option.disabled = !!reason;
+      if (reason) hints.add(reason);
+    }
+    select.append(option);
+  }
+  select.value = current;
+  select.onchange = () => {
+    if (select.disabled || !select.value || select.selectedOptions[0].disabled || select.value === current) return;
+    select.blur();
+    changeType(element, select.value);
+  };
+  return wrap(title, [select, current === 'starter' ? note(t('editor.panel.starter_hint')) : null, ...[...hints].map(note)]);
+}
+
 const SECTIONS = {
   main: (element) => wrap('', [
     field(t('editor.asset.name'), titleInput(element)),
@@ -320,34 +383,7 @@ const SECTIONS = {
 
   table: (element) => tableSection(element),
 
-  /* Стартер прогона: блок с флажком start. Прогон начинается с него, worker он
-     не выдаётся, его ТЗ — описание прогона для leader. В папке стартер один:
-     галочка у других блоков гаснет (и сервер второй не даст поставить). */
-  starter: (element) => {
-    const on = !!element.props?.start;
-    const other = [...state.elements.values()]
-      .find((one) => one.id !== element.id && one.type === 'block' && one.props?.start);
-    const box = el('input');
-    box.type = 'checkbox';
-    box.checked = on;
-    box.disabled = state.viewOnly || (!on && !!other);
-    box.onchange = () => {
-      if (box.checked) {
-        scene.setProps(element.id, { start: true });
-        // Круг — ровный: стороны одинаковые.
-        const side = Math.max(120, Math.min(element.style?.width ?? 160, element.style?.height ?? 160));
-        scene.patch(element.id, { style: { width: side, height: side } });
-      } else {
-        scene.setProps(element.id, { start: null });
-      }
-    };
-    const line = el('label', 'row');
-    line.append(box, el('span', '', t('editor.panel.starter_title_short')));
-    const hint = !on && other
-      ? t('editor.panel.starter_exists', { no: other.no })
-      : t('editor.panel.starter_hint');
-    return wrap(t('editor.panel.starter'), [line, note(hint)], on);
-  },
+  type: typeSection,
 
   agent: (element) => {
     const select = el('select', 'input');

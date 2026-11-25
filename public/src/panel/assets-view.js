@@ -469,7 +469,7 @@ function draggableAsset(node, asset) {
 export function workFiles(files, root, folderId, onChange = null) {
   const rel = (file) => file.path.slice(root.length + 1);
   const url = (file) => `api.php?op=asset.workfile&project=${encodeURIComponent(api.projectKey())}`
-    + `&folder=${folderId}&path=${encodeURIComponent(rel(file))}`;
+    + `&${api.canonicalVisual ? 'parent' : 'folder'}=${folderId}&path=${encodeURIComponent(rel(file))}`;
   const open = (file) => openWorkfile(file, rel(file), url(file), folderId, onChange);
   // Значки как у материалов блока: свойства и удалить.
   const buttons = (node, file) => {

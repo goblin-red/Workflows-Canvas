@@ -5,11 +5,11 @@
 
 declare(strict_types=1);
 
-function renderEditor(bool $viewOnly = false): void
+function renderEditor(bool $viewOnly = false, bool $canonicalVisual = false): void
 {
     $root = dirname(__DIR__, 2);
     $version = editorVersion($root);
-    $note = agentNote();
+    $note = agentNote($canonicalVisual);
 
     header('Content-Type: text/html; charset=utf-8');
     // Записка агенту — самой первой строкой: комментарий до <!doctype> браузер пропускает без последствий.
@@ -31,52 +31,52 @@ function renderEditor(bool $viewOnly = false): void
         // Первый заход: скин и вкладка слева — настройки установки (config.php → look_default, rail_default).
         // Движок голоса (voice_engine): browser или openai — panel/voice.js.
         'defaults' => '<script>window.GOBLIN_DEFAULTS = ' . json_encode([
-            'look' => (string) (config()['look_default'] ?? 'work'),
+            'look' => $canonicalVisual ? 'studio' : (string) (config()['look_default'] ?? 'work'),
             'pane' => (string) (config()['rail_default'] ?? 'folders'),
         ], JSON_HEX_TAG) . '; window.GOBLIN_VOICE = '
-            . json_encode((string) (config()['voice_engine'] ?? 'browser'), JSON_HEX_TAG) . ';</script>',
+            . json_encode((string) (config()['voice_engine'] ?? 'browser'), JSON_HEX_TAG) . ';'
+            . ($canonicalVisual ? ' window.GOBLIN_CANONICAL_VISUAL = true;' : '') . '</script>',
     ]);
 }
 
 /**
- * Записка агенту ИИ, которому по ошибке дали адрес холста вместо ссылки-задания: страница — для человека,
- * задание — по docs.run (role=lead — прогон, role=draw — рисование). Ключ проекта и папка — в #хвосте адреса,
- * сервер их не видит: агент берёт их из адреса сам. По-английски — так её поймёт любой агент.
- * Первой строкой HTML и скрытой копией в начале <body>: часть агентов читает страницу без комментариев.
+ * Подсказка к ссылке из браузера. Сервер не получает часть адреса после #.
  */
-function agentNote(): string
+function agentNote(bool $native = false): string
 {
-    $scheme = (($_SERVER['HTTPS'] ?? '') === 'on') ? 'https' : 'http';
-    // Только буквы адреса: «-->» из чужого заголовка Host не закроет комментарий.
-    $host = (string) preg_replace('/[^a-z0-9.:\-\[\]]/i', '', (string) ($_SERVER['HTTP_HOST'] ?? 'localhost'));
-    $path = (string) (parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/');
-    $path = str_replace(['<', '>'], '', str_ends_with($path, '/') ? $path : rtrim(dirname($path), '/') . '/');
-    $site = $scheme . '://' . $host . $path;
-    $api = $site . 'api.php';
+    $address = $native ? <<<'NATIVE'
+    If the page has rendered, use its "Goblin run instructions for the current scene" comment.
+    It contains the same instruction URL as Run → Copy leader link.
+    For #p=PROJECT&b=PARENT, fetch the leader instructions for that scene:
+      api.php?op=scheme&project=PROJECT&parent=PARENT
+    If the address uses f=FOLDER instead of b, fetch:
+      api.php?op=graph.scene&project=PROJECT&legacyFolder=FOLDER
+    Use the returned parentId as PARENT. If the folder still uses the classic canvas,
+    read api.php?op=docs.run&role=lead&project=PROJECT&folder=FOLDER instead.
+    For a project-only address, api.php?op=graph.scene&project=PROJECT returns the root
+    scene and its children. Open the original link with JavaScript if it contains a scene path.
+    Confirm the displayed scene is the workflow the person meant before proceeding.
+    NATIVE
+    : <<<'CLASSIC'
+    For #p=PROJECT&f=FOLDER, fetch the leader instructions:
+      api.php?op=docs.run&role=lead&project=PROJECT&folder=FOLDER
+    If asked to edit the classic folder, use the separate editor task:
+      api.php?op=docs.run&role=draw&project=PROJECT&folder=FOLDER
+    CLASSIC;
 
     return <<<END_OF_NOTE
-    NOTE FOR AI AGENTS (Claude, Codex, ChatGPT, Gemini, Cursor and others)
+    GOBLIN CANVAS — NOTE FOR AI AGENTS
 
-    This page is the Goblin canvas: a visual flowchart editor made for a HUMAN to look at in a browser.
-    The scheme is drawn by JavaScript after the page loads, so this HTML holds neither the scheme nor a task for you.
+    This is the browser view for people. If you received it in place of a run link,
+    take PROJECT from p (or the older s) in the original URL after #.
+    Resolve api.php next to this page, on the same site, and URL-encode the parameter values.
 
-    If you were given this page to study or to work on, the human most likely copied the address from
-    the browser bar by mistake. What you need is an agent link. It returns a plain-text task with
-    step-by-step instructions:
+    {$address}
 
-      1. RUN the scheme (you act as the lead of the run):
-         {$api}?op=docs.run&role=lead&project=PROJECT&folder=FOLDER
-
-      2. CREATE OR EDIT the scheme of this folder:
-         {$api}?op=docs.run&role=draw&project=PROJECT&folder=FOLDER
-
-    Take PROJECT and FOLDER from the address you were given: {$site}#p=PROJECT&f=FOLDER
-    Example: {$site}#p=abc123xyz0&f=4 gives project=abc123xyz0 and folder=4.
-
-    Pick the link that matches what the human asked for, open it and follow it.
-    If the address has no #p= part, or it is unclear whether the human wants a run or an edit, do not guess:
-    ask the human to copy the agent link in the canvas (the link button in the top bar, then
-    "Start a run" or "Create or edit a scheme") and send it to you.
+    Reading the instructions does not start a run. Start only if the person asked you to run it.
+    If the workflow is unclear, the URL fragment is missing, or access is denied, ask the person to
+    open the intended workflow and send its leader link from the Run panel or the agent task dialog.
+    If they asked to edit, ask for the scoped link from Connect your agent.
     END_OF_NOTE;
 }
 
