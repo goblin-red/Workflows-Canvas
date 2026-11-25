@@ -13,8 +13,9 @@ import { escape, chatLine } from 'goblin/ui/rich.js';
 import { openNewScheme } from 'goblin/shell/newscheme.js';
 import { dictate, stopDictation, dropDictation, isDictating, isStarting, onDictationLost, speak, stopSpeaking, voiceEngine } from 'goblin/panel/voice.js';
 import { t } from 'goblin/core/i18n.js';
+import { mountAiAgent } from 'goblin/shell/ai-agent.js';
 
-let screen, log, input, chatId = null, timer = null;
+let screen, log, input, agentControl, chatId = null, timer = null;
 /* Предел ожидания ответа: свой handle, иначе старый предел гасил опрос нового вопроса. */
 let timerCap = null;
 /* Папка, к которой относится экран помощника: разговор живёт в папке, где его
@@ -53,6 +54,12 @@ export function initAi() {
   screen = document.getElementById('screen-ai');
   log = document.getElementById('ai-log');
   input = document.getElementById('ai-input');
+  if (!state.viewOnly) {
+    agentControl = mountAiAgent(document.getElementById('ai-agent'), {
+      getTarget: () => state.folder ? { project: api.projectKey(), folder: state.folder.id } : null,
+    });
+    on('ai-agent', agentControl.open);
+  }
 
   // Кнопки «ИИ» в шапке больше нет: помощника открывает вкладка ✦ правой панели.
   document.getElementById('btn-ai')?.addEventListener('click', toggleAi);
@@ -190,7 +197,7 @@ export function toggleAi(force) {
   if (!screen) return;
   screen.hidden = force === undefined ? !screen.hidden : !force;
   document.body.classList.toggle('ai-open', !screen.hidden);
-  if (!screen.hidden) { input.focus(); refresh(); }
+  if (!screen.hidden) { input.focus(); refresh(); void agentControl?.refresh(); }
   else hush();
 }
 

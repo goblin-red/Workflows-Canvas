@@ -19,15 +19,18 @@ foreach ([
     // Домены
     'journal/journal.php', 'journal/changes.php',
     'projects/projects.php', 'projects/guests.php',
+    'graph/storage.php', 'graph/read.php', 'graph/batch.php', 'graph/guard.php', 'graph/write.php',
+    'graph/placement.php', 'graph/scene.php', 'graph/content.php',
     'folders/folders.php', 'folders/scheme.php', 'folders/transfer.php',
     'elements/kinds.php', 'elements/shape.php', 'elements/elements.php',
     'elements/members.php', 'elements/props.php', 'elements/table.php', 'elements/find.php',
-    'assets/assets.php', 'assets/links.php', 'assets/files.php',
+    'assets/assets.php', 'assets/links.php', 'assets/files.php', 'assets/graph.php',
     'agents/agents.php',
     'ai/deepseek.php', 'ai/jev.php',
     'ai/jev/questions.php', 'ai/jev/state.php', 'ai/jev/verdict.php', 'ai/jev/client.php',
-    'ai/access.php', 'ai/calls.php', 'ai/voice.php', 'ai/settings.php', 'ai/context.php', 'ai/compile.php',
+    'ai/access.php', 'ai/calls.php', 'ai/voice.php', 'ai/settings.php', 'ai/context.php', 'ai/compile.php', 'ai/graph.php',
     'ai/chat.php', 'ai/jobs.php', 'ai/play.php', 'ai/build.php', 'ai/usage.php',
+    'ai/terminal-agent.php', 'ai/terminal-editor.php',
     // Движок прогона
     'engine/lock.php', 'engine/guard.php',
     'engine/runs.php', 'engine/precheck.php', 'engine/prepare.php',
@@ -40,7 +43,7 @@ foreach ([
     'engine/finish.php', 'engine/advance.php', 'engine/state.php', 'engine/paint.php',
     'engine/events.php', 'engine/jobs.php', 'engine/pulse.php', 'engine/timeline.php',
     'templates/templates.php',
-    'templates/catalog.php',
+    'templates/catalog.php', 'templates/graph.php',
 ] as $file) {
     require_once $root . '/' . $file;
 }

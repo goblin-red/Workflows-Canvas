@@ -1,6 +1,6 @@
 <?php
 /* Роутер встроенного сервера PHP — то же, что .htaccess под Apache (корень, public/, public/workfiles/).
-   Запуск из корня Гоблина (инструкция — md_backend/homebrew.md):
+   Запуск из корня Гоблина (инструкция — md_backend/ru/backup.md):
      php -S localhost:8080 -t public -d upload_max_filesize=100M -d post_max_size=105M bin/router.php
    Отдаёт: false — файл из public/ как есть (PHP исполняет сервер сам); иначе — отказ или переадресация.
    Не делает: ничего сверх .htaccess — правила те же. */
@@ -9,13 +9,9 @@ declare(strict_types=1);
 
 $path = rawurldecode((string) parse_url((string) $_SERVER['REQUEST_URI'], PHP_URL_PATH));
 
-// Документация в рабочей папке и старые адреса сравнений — на публичные страницы.
-if (preg_match('~^/md_backend/документация(?:/index\.php|/?)$~u', $path)) {
+// Redirect old documentation URLs to the current public guide.
+if (preg_match('~^/(?:md_backend/(?:docs|документация)(?:/index\.php|/?)|(?:run-comparison|run-improvements)\.html)$~u', $path)) {
     header('Location: /documentation.php', true, 302);
-    return true;
-}
-if (preg_match('~^/(run-comparison|run-improvements)\.html$~', $path, $m)) {
-    header('Location: /documentation-file.php?file=' . $m[1] . '.html', true, 302);
     return true;
 }
 

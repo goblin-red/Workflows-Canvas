@@ -17,8 +17,8 @@ declare(strict_types=1);
 function stepsOpenCount(int $runId, int $elementId): int
 {
     return (int) dbValue(
-        "SELECT COUNT(*) FROM run_steps WHERE run_id = ? AND element_id = ? AND state IN ('issued','running','submitted')",
-        [$runId, $elementId]
+        "SELECT COUNT(*) FROM run_steps WHERE run_id = ? AND (block_id = ? OR element_id = ?) AND state IN ('issued','running','submitted')",
+        [$runId, $elementId, $elementId]
     );
 }
 
@@ -31,7 +31,7 @@ function marksFree(int $runId): array
 {
     $out = [];
     $rows = dbAll('SELECT * FROM run_marks WHERE run_id = ? AND taken_by_step_id IS NULL ORDER BY id', [$runId]);
-    foreach ($rows as $row) $out[(int) $row['edge_id']][] = $row;
+    foreach ($rows as $row) $out[historyArrow($row)][] = $row;
     return $out;
 }
 
@@ -81,10 +81,10 @@ function marksChoose(array $node, array $graph, array $free, bool $had, ?int $vi
         return ['via' => $via, 'marks' => [$lying[$via]]];
     }
 
-    if ($byDirect) return ['via' => (int) $byDirect[0]['edge_id'], 'marks' => $byDirect];
+    if ($byDirect) return ['via' => historyArrow($byDirect[0]), 'marks' => $byDirect];
 
     $byBack = $oldest(array_map($top, $back));
-    if ($byBack) return ['via' => (int) $byBack['edge_id'], 'marks' => [$byBack]];
+    if ($byBack) return ['via' => historyArrow($byBack), 'marks' => [$byBack]];
 
     if (!$direct && !$had) return ['via' => null, 'marks' => []];
     return null;
@@ -110,26 +110,27 @@ function marksTake(int $stepId, array $marks): void
  */
 function marksPut(array $run, array $step, array $graph): array
 {
-    $nodeId = (int) ($step['element_id'] ?? 0);
+    $nodeId = (int) historyNode($step);
     $node = $graph['nodes'][$nodeId] ?? null;
     if (!$node) return [];
 
     $edges = $node['type'] === 'decision'
-        ? ($step['chosen_edge_id'] ? [(int) $step['chosen_edge_id']] : [])
+        ? array_filter([historyChosen($step)])
         : graphOut($graph, $nodeId);
 
     $runId = (int) $run['id'];
     $put = [];
+    $column = empty($run['parent_block_id']) ? 'edge_id' : 'arrow_id';
     foreach ($edges as $edgeId) {
-        if (!isset($graph['edges'][$edgeId])) continue;      // стрелку успели удалить
+        if (($graph['edges'][$edgeId]['from_id'] ?? null) != $nodeId) continue;
 
-        $was = dbValue('SELECT id FROM run_marks WHERE run_id = ? AND edge_id = ? AND from_step_id = ?',
+        $was = dbValue("SELECT id FROM run_marks WHERE run_id = ? AND $column = ? AND from_step_id = ?",
             [$runId, $edgeId, (int) $step['id']]);
         if ($was) continue;
 
-        $pass = 1 + (int) dbValue('SELECT COUNT(*) FROM run_marks WHERE run_id = ? AND edge_id = ?', [$runId, $edgeId]);
+        $pass = 1 + (int) dbValue("SELECT COUNT(*) FROM run_marks WHERE run_id = ? AND $column = ?", [$runId, $edgeId]);
         dbRun(
-            'INSERT INTO run_marks (project_id, run_id, edge_id, from_step_id, pass) VALUES (?,?,?,?,?)',
+            "INSERT INTO run_marks (project_id, run_id, $column, from_step_id, pass) VALUES (?,?,?,?,?)",
             [(int) $run['project_id'], $runId, $edgeId, (int) $step['id'], $pass]
         );
         $put[] = $edgeId;
@@ -188,13 +189,13 @@ function marksEnter(array $run, array $element, ?int $via): array
         return ['via' => markTakeLegacy((int) $run['id'], $element, $via), 'marks' => []];
     }
 
-    $graph = engineGraph((int) $element['folder_id']);
+    $graph = runScene($run);
     $node  = $graph['nodes'][(int) $element['id']] ?? null;
     // Живая попытка — открытая или принятая: после возврата или провала старт снова открыт.
     $had   = (bool) dbValue(
-        "SELECT 1 FROM run_steps WHERE run_id = ? AND element_id = ?
+        "SELECT 1 FROM run_steps WHERE run_id = ? AND (block_id = ? OR element_id = ?)
            AND state IN ('issued','running','submitted','accepted') LIMIT 1",
-        [(int) $run['id'], (int) $element['id']]);
+        [(int) $run['id'], (int) $element['id'], (int) $element['id']]);
     $pick  = $node ? marksChoose($node, $graph, marksFree((int) $run['id']), $had, $via) : null;
 
     if ($pick === null) {
@@ -208,9 +209,8 @@ function marksEnter(array $run, array $element, ?int $via): array
 /** Шаг принят, ромб решён или шлюз пройден — жетоны на выходы. У старых прогонов жетонов-строк нет. */
 function marksGive(array $run, array $step): array
 {
-    if ((int) $run['engine'] !== 2 || !$step['element_id']) return [];
-    $folderId = (int) dbValue('SELECT folder_id FROM elements WHERE id = ?', [(int) $step['element_id']]);
-    return marksPut($run, $step, engineGraph($folderId));
+    if ((int) $run['engine'] !== 2 || !historyNode($step)) return [];
+    return marksPut($run, $step, runScene($run));
 }
 
 /**
@@ -233,14 +233,14 @@ function marksReconcile(array $run, array $step, string $was, string $now): void
     }
 
     $held = (int) dbValue('SELECT COUNT(*) FROM run_marks WHERE taken_by_step_id = ?', [$stepId]);
-    if (!$held && $step['element_id']) {
-        $folderId = (int) dbValue('SELECT folder_id FROM elements WHERE id = ?', [(int) $step['element_id']]);
-        $graph = engineGraph($folderId);
-        $node  = $graph['nodes'][(int) $step['element_id']] ?? null;
+    if (!$held && historyNode($step)) {
+        $graph = runScene($run);
+        $node = $graph['nodes'][historyNode($step)] ?? null;
         $pick  = $node ? marksChoose($node, $graph, marksFree((int) $run['id']), true) : null;
         if ($pick && $pick['marks']) {
             marksTake($stepId, $pick['marks']);
-            dbRun('UPDATE run_steps SET via_edge_id = ? WHERE id = ?', [$pick['via'], $stepId]);
+            $column = empty($run['parent_block_id']) ? 'via_edge_id' : 'via_arrow_id';
+            dbRun("UPDATE run_steps SET $column = ? WHERE id = ?", [$pick['via'], $stepId]);
         }
     }
     if ($now === 'accepted') {

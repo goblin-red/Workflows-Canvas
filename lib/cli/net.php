@@ -118,10 +118,10 @@ function workerSession(array $f = [], bool $required = false): string
 {
     $session = is_string($f['session'] ?? null) ? trim($f['session']) : trim((string) cfg('session'));
     if ($session !== '' && !preg_match('/^[A-Za-z0-9._:-]{8,120}$/', $session)) {
-        die_('session: 8–120 знаков A–Z, a–z, 0–9, точка, подчёркивание, двоеточие или дефис');
+        die_('session: 8–120 characters: A–Z, a–z, 0–9, dot, underscore, colon or hyphen');
     }
     if ($required && $session === '') {
-        die_('для нового движка задай один id экземпляра и сохраняй его между вызовами: '
+        die_('Use the same worker session ID across commands with the current engine: '
             . 'export GOBLIN_WORKER_SESSION=$(openssl rand -hex 16)', 'worker_session_required', 3);
     }
     return $session;
@@ -173,7 +173,7 @@ function stepCacheRecord(array $f = []): ?array
     }
     if (!$files) return null;
     if (count($files) > 1) {
-        die_('у worker session несколько активных прогонов — укажи --id rN', 'cache_conflict');
+        die_('This worker session has multiple active runs. Specify --id rN.', 'cache_conflict');
     }
     $one = json_decode((string) @file_get_contents($files[0]), true);
     if (!is_array($one) || empty($one['token']) || ($one['scope'] ?? '') !== hash('sha256', implode('|', [
@@ -202,7 +202,7 @@ function stepCacheKeep(string $token, array $meta = [], array $f = []): void
         $body = $token;
     } else {
         $run = (int) ($meta['run'] ?? 0);
-        if (!$run) die_('сервер выдал шаг без номера прогона — кэшировать секрет небезопасно', 'bad_contract');
+        if (!$run) die_('The server returned a step without a run number. Its pass cannot be cached safely.', 'bad_contract');
         $prefix = stepCachePrefix($f);
         foreach (glob($prefix . '*.step') ?: [] as $old) @unlink($old);
         $file = $prefix . $run . '.step';
@@ -278,10 +278,10 @@ function call(string $method, string $op, array $args = [], array $f = [], int $
         if ($body === false && $try + 1 < $tries) usleep(150000);
     }
     // Сервер недоступен — код 2: так утилита отличает обрыв от отказа (md_backend/ru/progon.md).
-    if ($body === false) die_("сервер недоступен: " . cfg('url'), 'network', 2);
+    if ($body === false) die_("Server unavailable: " . cfg('url'), 'network', 2);
 
     $data = json_decode($body, true);
-    if (!is_array($data)) die_("сервер ответил не по-человечески: " . substr((string) $body, 0, 200));
+    if (!is_array($data)) die_("Server response is invalid: " . substr((string) $body, 0, 200));
 
     if (empty($data['ok'])) {
         $code = (string) ($data['code2'] ?? $data['code'] ?? '');
@@ -290,7 +290,7 @@ function call(string $method, string $op, array $args = [], array $f = [], int $
         // Это не приглашение повторять создание: вызывающий либо восстанавливает
         // доступ по безопасному receipt, либо просит человека сделать это явно.
         if ($code === 'replay_secret_unavailable' && !empty($data['committed'])) {
-            $fail = new CommittedReplay((string) ($data['error'] ?? 'команда выполнена, секрет не воспроизводится'), $data);
+            $fail = new CommittedReplay((string) ($data['error'] ?? 'The command completed. The pass cannot be returned again.'), $data);
             if (soft()) throw $fail;
             fwrite(STDERR, '✗ ' . committedReplayMessage($fail) . "  [replay_secret_unavailable]\n");
             exit(3);
@@ -299,9 +299,9 @@ function call(string $method, string $op, array $args = [], array $f = [], int $
         // Пропуск из кэша погас — шаг закрыт: кэш стираем и говорим worker, что делать.
         if ($from === 'cache' && in_array($code, ['step_closed', 'unauthorized'], true)) {
             stepCacheForget($f);
-            die_('шаг закрыт — зови goblin work (' . ($data['error'] ?? '') . ')', $code);
+            die_('This step closed. Call goblin work (' . ($data['error'] ?? '') . ')', $code);
         }
-        die_((string) ($data['error'] ?? 'ошибка'), $code);
+        die_((string) ($data['error'] ?? 'error'), $code);
     }
     return $data;
 }
@@ -331,12 +331,12 @@ function committedReplayMessage(CommittedReplay $fail): string
 {
     $recovery = is_array($fail->response['recovery'] ?? null) ? $fail->response['recovery'] : [];
     $where = array_filter([
-        !empty($recovery['op']) ? 'операция ' . $recovery['op'] : null,
-        !empty($recovery['run']) ? 'прогон r' . $recovery['run'] : null,
-        !empty($recovery['step']) ? 'шаг ' . $recovery['step'] : null,
+        !empty($recovery['op']) ? 'operation ' . $recovery['op'] : null,
+        !empty($recovery['run']) ? 'run r' . $recovery['run'] : null,
+        !empty($recovery['step']) ? 'step ' . $recovery['step'] : null,
     ]);
-    return 'команда выполнена, секрет не воспроизводится'
-        . ($where ? '; восстановить доступ: ' . implode(', ', $where) : '; нужно восстановление доступа');
+    return 'The command completed. The pass cannot be returned again.'
+        . ($where ? ' Restore access: ' . implode(', ', $where) : ' Restore access to continue.');
 }
 
 /** Отказ: напечатать и выйти с кодом (1 — отказ, 2 — сервер недоступен). */
@@ -431,7 +431,7 @@ function journalLine(string $workDir, string $text): void
     if (trim($workDir) === '') return;
     $dir = rtrim($workDir, '/') . '/service';
     @mkdir($dir, 0777, true);
-    @file_put_contents($dir . '/прогон.log', date('H:i:s') . '  ' . $text . "\n", FILE_APPEND);
+    @file_put_contents($dir . '/run.log', date('H:i:s') . '  ' . $text . "\n", FILE_APPEND);
 }
 
 
@@ -507,7 +507,7 @@ function runIdArg(array $f): ?string
 
     $id = is_string($f['id']) ? strtolower(trim($f['id'])) : '';
     if (!preg_match('/^r?[1-9]\d*$/', $id)) {
-        die_('--id: номер прогона или ярлык rN, а не «' . (is_string($f['id']) ? $f['id'] : '') . '»');
+        die_('--id expects a run number or an rN label. Got «' . (is_string($f['id']) ? $f['id'] : '') . '»');
     }
     return $id;
 }

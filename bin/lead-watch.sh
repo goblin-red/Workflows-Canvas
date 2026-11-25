@@ -27,7 +27,7 @@ if [[ "$QUIET" =~ ^[0-9]{1,9}$ ]] && (( 10#$QUIET > 0 )); then QUIET=$((10#$QUIE
 URL="${GOBLIN_URL:-http://localhost/goblin/api.php}"
 
 if [ -z "$KEY" ] || [ -z "$RUN" ]; then
-  echo "запуск: bin/lead-watch.sh <ключ проекта> <rN> [секунд тишины]"
+  echo "Usage: bin/lead-watch.sh PROJECT RUN [QUIET_SECONDS]"
   exit 2
 fi
 
@@ -43,21 +43,15 @@ status() {
 last=""
 since=$(date +%s)
 misses=0
-EN=""   # язык строк сторожа — как у статуса сервера: «прогон …» или «run …» (язык проекта)
 
 while true; do
   now="$(status)"
-  if [[ "$now" == run* ]]; then EN=1; elif [[ "$now" == прогон* ]]; then EN=0; fi
 
   # Сервер не ответил или ответил не строкой статуса
   if [[ "$now" != прогон* && "$now" != run* ]]; then
     misses=$((misses + 1))
     if [ "$misses" -ge 2 ]; then
-      case "$EN" in
-        1) echo "NO STATUS: $RUN — server answer: ${now:-empty}" ;;
-        0) echo "НЕТ СТАТУСА: $RUN — ответ сервера: ${now:-пусто}" ;;
-        *) echo "НЕТ СТАТУСА / NO STATUS: $RUN — ${now:-пусто / empty}" ;;
-      esac
+      echo "NO STATUS: $RUN — server answer: ${now:-empty}"
       exit 1
     fi
     sleep "$EVERY"
@@ -68,7 +62,7 @@ while true; do
   # Прогон закрыт — страховка больше не нужна
   case "$now" in
     *" · done · "*|*" · stopped · "*|*" · failed · "*)
-      if [ "$EN" = 1 ]; then echo "RUN CLOSED: $now"; else echo "ПРОГОН ЗАКРЫТ: $now"; fi
+      echo "RUN CLOSED: $now"
       exit 0
       ;;
   esac
@@ -78,13 +72,8 @@ while true; do
     last="$now"
     since=$(date +%s)
   elif [ $(( $(date +%s) - since )) -ge "$QUIET" ]; then
-    if [ "$EN" = 1 ]; then
-      if [ "$QUIET" -ge 60 ]; then quiet="$((QUIET / 60)) min"; else quiet="$QUIET s"; fi
-      echo "SILENCE $quiet: $now"
-    else
-      if [ "$QUIET" -ge 60 ]; then quiet="$((QUIET / 60)) мин"; else quiet="$QUIET с"; fi
-      echo "ТИШИНА $quiet: $now"
-    fi
+    if [ "$QUIET" -ge 60 ]; then quiet="$((QUIET / 60)) min"; else quiet="$QUIET s"; fi
+    echo "SILENCE $quiet: $now"
     exit 0
   fi
 

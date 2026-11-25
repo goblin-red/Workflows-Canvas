@@ -3,7 +3,7 @@
    Отдаёт: aiBuildGet(), aiBuildStart(), aiBuildAnswer(), aiBuildCreate(), aiBuildRun().
    Не делает: не зовёт модель в запросе человека — это фоновое задание (ai/jobs.php → aiBuildRun).
 
-   Ход (метод для модели — instructions/ru/конструктор.md):
+   Ход (метод для модели — instructions/ru/builder.md):
      цель → опрос: модель выбирает основу из каталога и задаёт вопрос карточкой (вопрос, варианты,
      зачем) — по одному, пока не хватит или человек не скажет «Хватит, собирай» →
      сборка: модель отдаёт разницу к основе (или схему с нуля), сервер сливает её в тело черновика
@@ -131,6 +131,7 @@ function aiBuildRun(array $job, array $project): void
 {
     $jobId = (int) $job['id'];
     $chatId = (int) $job['chat_id'];
+    $failure = null;
     try {
         $chat = dbRow('SELECT * FROM ai_chats WHERE id = ?', [$chatId]);
         $cards = aiBuildCards($chatId);
@@ -162,11 +163,14 @@ function aiBuildRun(array $job, array $project): void
             $messages[] = ['role' => $one['role'] === 'user' ? 'user' : 'assistant', 'content' => (string) $one['body']];
         }
 
-        $answer = aiAsk($messages);
+        $answer = aiBuildAsk($messages, $job['kind'] === 'questionnaire');
         $usage = [$answer['model'], $answer['usage']['prompt'], $answer['usage']['completion'],
                   $answer['usage']['total'], $answer['usage']['cached'], $answer['usage']['known'] ? 1 : 0];
         $think = $answer['think'] !== '' ? [$answer['think']] : [];
-        if (!is_array($answer['data'])) throw new RuntimeException(t('agents.ai.no_json'));
+        if (!is_array($answer['data'])) {
+            $failure = ['jsonFailure' => $answer['jsonFailure'] + ['completionTokens' => $answer['usage']['completion']]];
+            throw new RuntimeException(t('agents.ai.no_json'));
+        }
 
         if ($job['kind'] === 'questionnaire') {
             $card = aiBuildCard($answer['data'], $base);
@@ -199,13 +203,25 @@ function aiBuildRun(array $job, array $project): void
         });
     } catch (Throwable $error) {
         // Сбой не затирает «Стоп»: отменённое задание остаётся отменённым.
-        dbRun("UPDATE ai_jobs SET state = 'failed', error = ?, finished_at = NOW(3) WHERE id = ? AND state = 'running'",
-            [mb_substr($error->getMessage(), 0, 500), $jobId]);
+        dbRun("UPDATE ai_jobs SET state = 'failed', error = ?, response = ?, finished_at = NOW(3) WHERE id = ? AND state = 'running'",
+            [mb_substr($error->getMessage(), 0, 500), $failure === null ? null : json_encode($failure), $jobId]);
         // Сборка сорвалась: черновик уже был — он остаётся (доработку можно повторить),
         // не было — опрос открыт, человек может собрать ещё раз.
         dbRun("UPDATE ai_chats SET state = IF(state = 'building', ?, state) WHERE id = ?",
             [aiBuildDraftJob($chatId) ? 'ready' : 'questionnaire', $chatId]);
     }
+}
+
+/** Повтор формата с исходной историей и примером полей для текущего режима. */
+function aiBuildAsk(array $messages, bool $survey = false): array
+{
+    $shape = $survey
+        ? '{"say":"…","base":null,"question":{"text":"…","why":"…","options":["…"],"multi":false},"ready":false,"plan":[]}'
+        : '{"say":"…","name":"…","base":null,"elements":[{"ref":"b1","type":"block","title":"…","spec":"…"}]}';
+    return aiAsk($messages, [
+        'kind' => $survey ? 'constructor-questionnaire' : 'constructor-draft',
+        'retry_json_shape' => "Expected JSON shape for the current task: $shape",
+    ]);
 }
 
 /**
@@ -228,7 +244,7 @@ function aiBuildDraft(array $project, array $answer, array $messages, ?array $st
         $think[] = ta('agents.ai.think_server', ['why' => $why]);
         $messages[] = ['role' => 'assistant', 'content' => $raw];
         $messages[] = ['role' => 'user', 'content' => ta('agents.ai.mode_fix', ['why' => $why, 'body' => json_encode($body, JSON_UNESCAPED_UNICODE)])];
-        $fixed = aiAsk($messages);
+        $fixed = aiBuildAsk($messages);
         foreach ([1 => 'prompt', 2 => 'completion', 3 => 'total', 4 => 'cached'] as $at => $name) $usage[$at] += $fixed['usage'][$name];
         if ($fixed['think'] !== '') $think[] = ta('agents.ai.think_fix', ['think' => $fixed['think']]);
         if (!is_array($fixed['data'])) break;

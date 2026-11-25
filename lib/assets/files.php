@@ -29,14 +29,17 @@ function assetUpload(): void
         if (!is_uploaded_file($tmp)) continue;
         $size = filesize($tmp);
         if ($size > UPLOAD_LIMIT) throw new ApiError(t('server.file.too_big'));
-        $items[] = ['tmp' => $tmp, 'name' => (string) ($names[$i] ?? 'файл'), 'size' => $size,
+        $items[] = ['tmp' => $tmp, 'name' => (string) ($names[$i] ?? 'file'), 'size' => $size,
                     'mime' => @mime_content_type($tmp) ?: '', 'sha' => hash_file('sha256', $tmp)];
     }
     if (!$items) throw new ApiError(t('server.file.none_saved'));
     filesLimitCheck($project, $items);
+    $link = (array) (input('link') ?: []);
+    if (!$link && ($hint = (int) (input('folder') ?: 0))) $link = ['folder' => $hint, 'role' => 'attachment'];
 
     // Ревизия и записи — под замком проекта, как у пачки: параллельная правка не обгонит дельту.
-    $done = engineLocked($projectId, static function () use ($projectId, $items) {
+    $done = engineLocked($projectId, static function () use ($projectId, $items, $link) {
+        if (isset($link['element']) || isset($link['folder'])) requireClassicSchemaWrite($projectId);
         $rev = bumpRev($projectId);
         // Файл ложится только в in/ рабочей папки папки схемы.
         $dir = uploadDir($projectId, $rev);
@@ -57,11 +60,9 @@ function assetUpload(): void
 
             // Сразу прицепить, если сказано куда. Грузили в рабочую папку без привязки
             // (материалы проекта) — файл там и лежит: цепляем к этой папке схемы.
-            $link = input('link');
-            if (!$link && ($hint = (int) (input('folder') ?: 0))) $link = ['folder' => $hint, 'role' => 'attachment'];
             if ($link) {
                 $ctx = ['projectId' => $projectId, 'rev' => $rev, 'refs' => [], 'folders' => [], 'warnings' => []];
-                assetLink(array_merge((array) $link, ['asset' => $id]), $ctx);
+                assetLink(array_merge($link, ['asset' => $id]), $ctx);
                 foreach (array_unique($ctx['folders']) as $folderId) touchFolder((int) $folderId, $rev);
             }
             $out[] = assetShape(dbRow('SELECT * FROM assets WHERE id = ?', [$id]));
@@ -81,7 +82,7 @@ function filesLimit(): array
 /**
  * Загрузка на сервер в вебе: файл не больше лимита, файлов у человека (владельца проекта; у гостя — в проекте)
  * не больше лимита. Сверх — отказ со словами, что на платном аккаунте лимит снимается (платных пока нет,
- * md_backend/ru/на_будущее.md). Локальная установка — без лимитов: сервер и есть компьютер человека.
+ * см. task.md). Локальная установка — без лимитов: сервер и есть компьютер человека.
  */
 function filesLimitCheck(array $project, array $items): void
 {
@@ -136,7 +137,7 @@ function uploadDir(int $projectId, int $rev): string
 /** Свободное имя файла в папке: «имя.png», занято — «имя (2).png». */
 function freeFileName(string $dir, string $name): string
 {
-    $name = trim(str_replace(['/', '\\', "\0"], '_', basename($name)), ' .') ?: 'файл';
+    $name = trim(str_replace(['/', '\\', "\0"], '_', basename($name)), ' .') ?: 'file';
     $ext = pathinfo($name, PATHINFO_EXTENSION);
     $stem = $ext !== '' ? substr($name, 0, -strlen($ext) - 1) : $name;
     $path = $dir . '/' . $name;

@@ -14,7 +14,7 @@
 
 declare(strict_types=1);
 
-const TEMPLATE_FAMILIES = ['scheme' => 'схема-образец', 'flow' => 'демо-прогон'];
+const TEMPLATE_FAMILIES = ['scheme' => 'Scheme template', 'flow' => 'Run example'];
 
 function templateShape(array $row, bool $withBody = false): array
 {
@@ -129,6 +129,7 @@ function templateDeploy(array $project, array $body, array $opts): array
 
     // Ревизия, журнал и схема — под замком проекта, как у пачки: параллельная правка не обгонит дельту.
     $rev = engineLocked($projectId, static function () use ($project, $projectId, &$folderId, $elements, $body, $opts, &$made) {
+        if (!batchDryRun()) requireClassicSchemaWrite($projectId);
         $rev = bumpRev($projectId);
         $journalId = journalOpen($projectId, $rev, null, (string) ($opts['via'] ?? 'tool'),
             ['label' => (string) ($opts['label'] ?? t('server.template.journal'))]);

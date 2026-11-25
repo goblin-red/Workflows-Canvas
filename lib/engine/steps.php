@@ -27,20 +27,21 @@ function stepShape(array $row): array
     $out = [
         'id'      => (int) $row['id'],
         'run'     => (int) $row['run_id'],
-        'element' => $row['element_id'] ? (int) $row['element_id'] : null,
+        'element' => historyNode($row),
         'no'      => (int) $row['element_no'],
         'title'   => (string) $row['element_title'],
         'attempt' => (int) $row['attempt'],
         'state'   => (string) $row['state'],
         'agent'   => $row['agent_id'] ? (int) $row['agent_id'] : null,
-        'via'     => $row['via_edge_id'] ? (int) $row['via_edge_id'] : null,
-        'chosen'  => $row['chosen_edge_id'] ? (int) $row['chosen_edge_id'] : null,
+        'via'     => historyVia($row),
+        'chosen'  => historyChosen($row),
         'opened'  => $row['opened_at'],
         'started' => $row['started_at'],
         'sent'    => $row['submitted_at'],
         'closed'  => $row['finished_at'],
         'rev'     => (int) $row['rev'],
     ];
+    if (!empty($row['block_id'])) $out['block'] = (int) $row['block_id'];
     if ($row['result'] !== null && $row['result'] !== '') $out['result'] = (string) $row['result'];
     if ($row['error'] !== null && $row['error'] !== '')   $out['error'] = (string) $row['error'];
     if ($row['note'] !== '')    $out['note'] = (string) $row['note'];
@@ -139,6 +140,10 @@ function stepRanOn(): string
 /** Элемент по номеру — только из папки прогона: чужая папка шаг не откроет. */
 function runElement(array $run, int $no): ?array
 {
+    if (!empty($run['parent_block_id'])) {
+        foreach (runScene($run)['nodes'] as $node) if ($node['no'] === $no) return $node;
+        return null;
+    }
     return dbRow('SELECT * FROM elements WHERE folder_id = ? AND `no` = ?', [(int) $run['folder_id'], $no]);
 }
 
@@ -245,8 +250,8 @@ function stepOpen(): void
         $projectId = (int) $project['id'];
         runMustBeLive($run, true);
 
-        $no = stepNoAsked();
-        $element = runElement($run, $no);
+        $element = runElementAsked($run);
+        $no = (int) ($element['no'] ?? 0);
         if (!$element) throw new ApiError(ta('agents.steps.no_such_element'), 'not_found');
         if (!kindRule((string) $element['type'])['step']) {
             throw new ApiError(ta('agents.steps.step_kinds'));
@@ -266,7 +271,7 @@ function stepOpen(): void
         }
 
         $via = inputInt('via');
-        if ($via) {
+        if ($via && empty($run['parent_block_id'])) {
             $arrow = dbRow('SELECT id FROM elements WHERE id = ? AND project_id = ?', [$via, $projectId]);
             if (!$arrow) throw new ApiError(ta('agents.steps.arrow_not_found'), 'not_found');
         }
@@ -278,22 +283,26 @@ function stepOpen(): void
            из блока. Нет его или не worker (например ведущий) — шаг без агента: его
            делает ведущий сам. В solo worker нет вовсе, как и в advanceIssue. */
         $agentId = null;
-        $folder = dbRow('SELECT role_scheme, run_env FROM folders WHERE id = ?', [(int) $run['folder_id']]);
-        $solo = !$folder || (string) $folder['role_scheme'] === 'solo';
-        if ($element['type'] === 'block' && !$solo) {
-            $card = folderUsesAgentCards((int) $run['folder_id']) && $element['agent_id'] ? (int) $element['agent_id'] : null;
-            $agentId = inputInt('agent') ?: $card;
-            if ($agentId && agentRow($agentId, $projectId)['role'] !== 'worker') $agentId = null;
+        $graph = runScene($run);
+        if (!empty($graph['native'])) {
+            $agentId = nativeStepAgent($run, $element);
+        } else {
+            $folder = dbRow('SELECT role_scheme, run_env FROM folders WHERE id = ?', [(int) $run['folder_id']]);
+            $solo = !$folder || (string) $folder['role_scheme'] === 'solo';
+            if ($element['type'] === 'block' && !$solo) {
+                $card = folderUsesAgentCards((int) $run['folder_id']) && $element['agent_id'] ? (int) $element['agent_id'] : null;
+                $agentId = inputInt('agent') ?: $card;
+                if ($agentId && agentRow($agentId, $projectId)['role'] !== 'worker') $agentId = null;
+            }
         }
 
-        // Задание обязательно — ТЗ или описание: работать по одному названию блока — это как раз то, что ломало прогоны.
-        $spec = specText('element_id', (int) $element['id']);
-        if (kindRule((string) $element['type'])['spec'] && $element['type'] !== 'decision' && taskText((int) $element['id']) === '') {
+        $spec = runTaskSpec($graph, (int) $element['id']);
+        if (runTaskText($graph, (int) $element['id']) === '') {
             throw new ApiError(ta('agents.steps.no_spec'), 'conflict', ['code2' => 'no_spec']);
         }
 
         $attempt = stepNextAttempt((int) $run['id'], $no);
-        $max = graphMaxAttempts(engineGraph((int) $element['folder_id']), (int) $element['id']);
+        $max = graphMaxAttempts($graph, (int) $element['id']);
         if (stepOverLimit((int) $run['id'], $no, $max)) throw new ApiError(ta('agents.steps.over_limit', ['max' => $max]), 'conflict');
 
         $fresh = stepIssue($run, $element, $enter, $agentId, $spec, $attempt,
@@ -302,7 +311,7 @@ function stepOpen(): void
         $token = tokenIssue('step', [
             'project_id' => $projectId, 'run_id' => (int) $run['id'],
             'step_id' => (int) $fresh['id'], 'agent_id' => $agentId,
-        ], 'шаг ' . $no . '.' . $attempt);
+        ], 'step ' . $no . '.' . $attempt);
 
         return [
             'step'  => stepShape($fresh),
@@ -375,17 +384,21 @@ function stepDecide(): void
         $runId = (int) $run['id'];
         runMustBeLive($run, true);
 
-        $no = stepNoAsked();
-        $element = runElement($run, $no);
+        $element = runElementAsked($run);
         if (!$element || $element['type'] !== 'decision') throw new ApiError(ta('agents.steps.not_decision'), 'not_found');
 
-        $branch = (string) (input('branch') ?? '');
-        if (!in_array($branch, ['yes', 'no'], true)) throw new ApiError(ta('agents.steps.branch_values'));
-        $arrow = dbRow("SELECT * FROM elements WHERE type = 'arrow' AND from_id = ? AND branch = ?", [$element['id'], $branch]);
-        if (!$arrow) throw new ApiError(ta('agents.steps.no_exit', ['branch' => $branch]), 'conflict');
+        $key = trim((string) (input('branch') ?? ''));
+        $edgeId = branchInputEdge();
+        if ($key === '' && $edgeId === null) throw new ApiError(branchMessage('unknown'));
+        $graph = runScene($run);
+        $choice = graphSelectBranch($graph, (int) $element['id'], $key, $edgeId);
+        if (!$choice['edge']) {
+            throw new ApiError($choice['status'] === 'ambiguous' ? branchMessage('ambiguous')
+                : ta('agents.steps.no_exit', ['branch' => $key !== '' ? $key : $edgeId]), 'conflict');
+        }
 
         $enter = marksEnter($run, $element, inputInt('via') ?: null);
-        $made = stepDecideDo($run, $element, $arrow, $branch, trim((string) (input('why') ?? '')), $enter, leadActor());
+        $made = stepDecideDo($run, $graph['nodes'][(int) $element['id']], $choice['edge'], trim((string) (input('why') ?? '')), $enter, leadActor());
 
         return ['step' => stepShape($made)];
     }, $repeated);
@@ -405,12 +418,12 @@ function stepPass(): void
         $runId = (int) $run['id'];
         runMustBeLive($run, true);
 
-        $no = stepNoAsked();
-        $element = runElement($run, $no);
+        $element = runElementAsked($run);
         if (!$element || $element['type'] !== 'gateway') throw new ApiError(ta('agents.steps.not_gateway'), 'not_found');
         $made = stepPassDo($run, $element, inputInt('via') ?: null);
 
-        return ['step' => stepShape($made), 'folder' => (int) $element['target_folder_id']];
+        return ['step' => stepShape($made)] + (!empty($run['parent_block_id'])
+            ? ['parent' => (int) $element['target_block_id']] : ['folder' => (int) $element['target_folder_id']]);
     }, $repeated);
 
     if (!$repeated && ($move = advanceAfter($runId))) $out['advance'] = $move;
@@ -420,10 +433,11 @@ function stepPass(): void
 /** Переход шлюза внутри уже открытой транзакции: step.pass и done простого пути. */
 function stepPassDo(array $run, array $element, ?int $via = null): array
 {
-    $target = (int) $element['target_folder_id'];
+    $native = !empty($run['parent_block_id']);
+    $target = (int) ($element['target_block_id'] ?? $element['target_folder_id']);
     if (!$target) throw new ApiError(ta('agents.steps.gateway_no_target'), 'conflict');
 
-    $other = runActive($target);
+    $other = $native ? nativeActive((int) $run['project_id'], $target) : runActive($target);
     if ($other && (int) $other['id'] !== (int) $run['id']) {
         throw new ApiError(ta('agents.steps.target_busy'), 'conflict');
     }
@@ -431,7 +445,7 @@ function stepPassDo(array $run, array $element, ?int $via = null): array
     $enter = marksEnter($run, $element, $via);
     return stepInsertAccepted($run, $element, $enter, ['result' => ta('agents.steps.pass_result', ['target' => $target])],
         ['pass', ta('agents.steps.pass_title', ['no' => $element['no'], 'target' => $target]),
-         ['actor' => leadActor(), 'meta' => ['target_folder' => $target]]]);
+         ['actor' => leadActor(), 'meta' => [($native ? 'target_parent' : 'target_folder') => $target]]]);
 }
 
 /** POST step.cancel — отменить выданный шаг. */
@@ -465,7 +479,7 @@ function stepReissue(): void
         $token = tokenIssue('step', [
             'project_id' => (int) $project['id'], 'run_id' => (int) $run['id'],
             'step_id' => (int) $step['id'], 'agent_id' => $step['agent_id'] ? (int) $step['agent_id'] : null,
-        ], 'шаг ' . $step['element_no'] . '.' . $step['attempt']);
+        ], 'step ' . $step['element_no'] . '.' . $step['attempt']);
 
         return ['step' => stepShape($step), 'token' => $token['secret']];
     }));
@@ -478,6 +492,8 @@ function stepGet(): void
 {
     $who = caller();
     if ($who['role'] !== 'worker') throw new ApiError(ta('agents.steps.worker_only'), 'scope');
+
+    if (input('material') !== null) graphAssetFile();
 
     $project = requireProject(false);
     $projectId = (int) $project['id'];
@@ -651,7 +667,7 @@ function stepTakeOnce(
     $token = tokenIssue('step', [
         'project_id' => $projectId, 'run_id' => (int) $step['run_id'],
         'step_id' => $stepId, 'agent_id' => $step['agent_id'] ? (int) $step['agent_id'] : null,
-    ], 'шаг ' . $step['element_no'] . '.' . $step['attempt']);
+    ], 'step ' . $step['element_no'] . '.' . $step['attempt']);
 
     eventStep($step, 'task', $again
         ? ta('agents.steps.ev_reissued', ['task' => "{$step['element_no']}.{$step['attempt']}"])
@@ -794,9 +810,15 @@ function stepOwn(bool $leadOnly): array
     }
 
     [$project, $run] = runOwn($leadOnly);
-    $step = inputInt('step')
-        ? stepRow((int) inputInt('step'), $projectId)
-        : (inputInt('no') ? stepByNo((int) $run['id'], (int) inputInt('no')) : stepTheOnlyOpen((int) $run['id']));
+    $stepId = inputInt('step');
+    $no = inputInt('no');
+    if (!$stepId && !empty($run['parent_block_id']) && input('block') !== null) {
+        $node = runElementAsked($run);
+        if (!$node) throw new ApiError(ta('agents.steps.no_such_element'), 'not_found');
+        $no = $node['no'];
+    }
+    $step = $stepId ? stepRow($stepId, $projectId)
+        : ($no ? stepByNo((int) $run['id'], $no) : stepTheOnlyOpen((int) $run['id']));
     if ((int) $step['run_id'] !== (int) $run['id']) throw new ApiError(ta('agents.steps.other_run'), 'scope');
     return [$project, $run, $step];
 }
@@ -970,15 +992,16 @@ function stepIssue(array $run, array $element, array $enter, ?int $agentId, ?arr
     $projectId = (int) $run['project_id'];
     $no = (int) $element['no'];
 
-    $rev = bumpRev($projectId);
-    dbRun(
-        'INSERT INTO run_steps (project_id, run_id, element_id, element_no, element_title, attempt, state, via_edge_id, agent_id,
-                                lead_self, spec_hash, note, rev)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        [$projectId, (int) $run['id'], (int) $element['id'], $no, $element['title'], $attempt, 'issued',
-         $enter['via'], $agentId, stepLeadSelf((int) $run['folder_id'], $agentId),
-         $spec ? hash('sha256', $spec['text']) : null, mb_substr($note, 0, 500), $rev]
-    );
+    $values = historyStepInsert($run, $element, $enter['via']) + [
+        'project_id' => $projectId, 'run_id' => (int) $run['id'], 'element_no' => $no,
+        'element_title' => $element['title'], 'attempt' => $attempt, 'state' => 'issued',
+        'agent_id' => $agentId, 'lead_self' => empty($run['parent_block_id'])
+            ? stepLeadSelf((int) $run['folder_id'], $agentId) : (int) !$agentId,
+        'spec_hash' => $spec ? hash('sha256', $spec['text']) : null,
+        'note' => mb_substr($note, 0, 500), 'rev' => bumpRev($projectId),
+    ];
+    dbRun('INSERT INTO run_steps (' . implode(', ', array_keys($values)) . ') VALUES ('
+        . implode(',', array_fill(0, count($values), '?')) . ')', array_values($values));
     $stepId = dbId();
     marksTake($stepId, $enter['marks']);
     runTouch((int) $run['id']);
@@ -1053,11 +1076,11 @@ function stepInsertAccepted(array $run, array $element, array $enter, array $row
                             array $vars = []): array
 {
     $projectId = (int) $run['project_id'];
-    $cols = [
-        'project_id' => $projectId, 'run_id' => (int) $run['id'], 'element_id' => (int) $element['id'],
+    $cols = historyStepInsert($run, $element, $enter['via']) + [
+        'project_id' => $projectId, 'run_id' => (int) $run['id'],
         'element_no' => (int) $element['no'], 'element_title' => $element['title'],
         'attempt'    => stepNextAttempt((int) $run['id'], (int) $element['no']),
-        'state'      => 'accepted', 'via_edge_id' => $enter['via'], 'rev' => bumpRev($projectId),
+        'state'      => 'accepted', 'rev' => bumpRev($projectId),
     ] + $row;
     dbRun('INSERT INTO run_steps (' . implode(', ', array_keys($cols)) . ', submitted_at, finished_at)
            VALUES (' . implode(',', array_fill(0, count($cols), '?')) . ',NOW(3),NOW(3))', array_values($cols));
@@ -1078,14 +1101,16 @@ function stepInsertAccepted(array $run, array $element, array $enter, array $row
  * Решить ромб: сразу принятая попытка, жетон уходит на выбранную ветку.
  * Переменные входа ромб переносит дальше без изменений.
  */
-function stepDecideDo(array $run, array $element, array $arrow, string $branch, string $why,
+function stepDecideDo(array $run, array $element, array $arrow, string $why,
                       array $enter, string $actor): array
 {
-    $word = $branch === 'yes' ? ta('agents.steps.word_yes') : ta('agents.steps.word_no');
+    $word = branchLabel($arrow);
+    $titleWord = empty($arrow['label']) && in_array($arrow['branch'], ['yes', 'no'], true) ? mb_strtolower($word) : $word;
+    $column = empty($run['parent_block_id']) ? 'chosen_edge_id' : 'chosen_arrow_id';
     $made = stepInsertAccepted($run, $element, $enter,
-        ['chosen_edge_id' => (int) $arrow['id'], 'result' => ta('agents.steps.branch_result', ['word' => $word]), 'note' => mb_substr($why, 0, 500)],
-        ['decide', ta('agents.steps.decide_title', ['no' => $element['no'], 'word' => mb_strtolower($word)]) . ($why !== '' ? " · $why" : ''),
-         ['actor' => $actor, 'meta' => ['branch' => $branch]]]);
+        [$column => (int) $arrow['id'], 'result' => ta('agents.steps.branch_result', ['word' => $word]), 'note' => mb_substr($why, 0, 500)],
+        ['decide', ta('agents.steps.decide_title', ['no' => $element['no'], 'word' => $titleWord]) . ($why !== '' ? " · $why" : ''),
+         ['actor' => $actor, 'meta' => ['branch' => $arrow['branch'], 'edge' => (int) ($arrow['arrow_id'] ?? $arrow['id']), 'label' => $word]]]);
 
     // Вопрос и ответ Jev про ромб шли раньше шага: теперь шаг есть — привязываем их к нему.
     dbRun("UPDATE run_events SET step_id = ?, attempt = ?
@@ -1164,17 +1189,16 @@ function stepState(): void
     reply(engineCommand(static function (): array {
         [$project, $run] = runOwn(true);
         $projectId = (int) $project['id'];
-        $no = inputInt('no');
+        $element = runElementAsked($run);
+        $no = (int) ($element['no'] ?? 0);
         $want = (string) (input('state') ?? '');
-        if (!$no) throw new ApiError(ta('agents.steps.no_number'), 'not_found');
-        if ($want === 'none') return stepResetDo($project, $run);
+        if (!$element) throw new ApiError(ta('agents.steps.no_such_element'), 'not_found');
+        if ($want === 'none') return stepResetDo($project, $run, $no);
 
         $known = ['issued', 'running', 'submitted', 'accepted', 'returned', 'failed', 'cancelled'];
         if (!in_array($want, $known, true)) throw new ApiError(ta('agents.steps.no_such_state', ['state' => $want]));
-
-        $element = runElement($run, $no);
-        if (!$element) throw new ApiError(ta('agents.steps.no_such_element'), 'not_found');
-        if (!kindRule((string) $element['type'])['step']) {
+        $native = !empty($run['parent_block_id']);
+        if (!kindRule((string) $element['type'])['step'] || ($native && $element['type'] !== 'block')) {
             throw new ApiError(ta('agents.steps.step_kinds'));
         }
 
@@ -1185,14 +1209,15 @@ function stepState(): void
 
         // Шага ещё не было — заводим запись, чтобы человеку было что красить.
         if (!$row) {
-            $agentId = $element['agent_id'] ? (int) $element['agent_id'] : null;
-            dbRun(
-                'INSERT INTO run_steps (project_id, run_id, element_id, element_no, element_title, attempt, state, agent_id,
-                                        lead_self, note, rev)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                [$projectId, $run['id'], $element['id'], $no, $element['title'], 1, 'issued', $agentId,
-                 stepLeadSelf((int) $run['folder_id'], $agentId), ta('agents.steps.state_set_by_human'), $rev]
-            );
+            $agentId = $native ? nativeStepAgent($run, $element) : ($element['agent_id'] ? (int) $element['agent_id'] : null);
+            $values = historyStepInsert($run, $element, null) + [
+                'project_id' => $projectId, 'run_id' => $run['id'], 'element_no' => $no,
+                'element_title' => $element['title'], 'attempt' => 1, 'state' => 'issued', 'agent_id' => $agentId,
+                'lead_self' => $native ? (int) !$agentId : stepLeadSelf((int) $run['folder_id'], $agentId),
+                'note' => ta('agents.steps.state_set_by_human'), 'rev' => $rev,
+            ];
+            dbRun('INSERT INTO run_steps (' . implode(', ', array_keys($values)) . ') VALUES ('
+                . implode(',', array_fill(0, count($values), '?')) . ')', array_values($values));
             $row = dbRow('SELECT * FROM run_steps WHERE id = ?', [dbId()]);
         }
 
@@ -1264,7 +1289,8 @@ function stepResetDo(array $project, array $run, ?int $no = null, bool $latest =
 {
     $projectId = (int) $project['id'];
     // Номер дают параметром (простой путь зовёт блок «block») или в запросе.
-    $no = $no ?? inputInt('no');
+    $no ??= !empty($run['parent_block_id']) && input('block') !== null
+        ? (runElementAsked($run)['no'] ?? null) : inputInt('no');
     if (!$no) throw new ApiError(ta('agents.steps.no_number'), 'not_found');
 
     if ((int) $run['engine'] !== 2) {
@@ -1292,7 +1318,8 @@ function stepResetDo(array $project, array $run, ?int $no = null, bool $latest =
     }
     if (!$row) throw new ApiError(ta('agents.steps.no_steps_of_element'), 'not_found');
     // Стартер только отмечает начало — переделывать в нём нечего.
-    if (isStarter((int) $row['element_id'])) throw new ApiError(ta('agents.steps.starter_no_redo', ['no' => $no]), 'conflict');
+    $starter = !empty($row['block_id']) ? graphStarter(runScene($run)) === historyNode($row) : isStarter((int) $row['element_id']);
+    if ($starter) throw new ApiError(ta('agents.steps.starter_no_redo', ['no' => $no]), 'conflict');
 
     /* На этом результате уже построены другие шаги. Шаги без работы — выдачу,
        которую не взяли, и решение ромба — снимаем заодно, глубже первыми. Блок
@@ -1307,7 +1334,7 @@ function stepResetDo(array $project, array $run, ?int $no = null, bool $latest =
             foreach (marksHeirs($ids) as $heir) {
                 $id = (int) $heir['id'];
                 if (isset($work[$id]) || isset($empty[$id])) continue;
-                $type = (string) dbValue('SELECT type FROM elements WHERE id = ?', [(int) $heir['element_id']]);
+                $type = historyKind($heir);
                 if (!$lead || ($heir['state'] !== 'issued' && $type !== 'decision')) { $work[$id] = $heir; continue; }
                 $walk([$id]);
                 $empty[$id] = $heir;
@@ -1335,7 +1362,7 @@ function stepResetDo(array $project, array $run, ?int $no = null, bool $latest =
     bumpRev($projectId);
     runTouch((int) $run['id']);
 
-    $type = (string) dbValue('SELECT type FROM elements WHERE id = ?', [(int) $row['element_id']]);
+    $type = historyKind($row);
     return ['no' => $no, 'reset' => 1 + count($also), 'address' => $row['element_no'] . '.' . $row['attempt'],
             'also' => $also, 'state' => $row['state'], 'type' => $type];
 }
@@ -1362,7 +1389,7 @@ function stepErase(int $projectId, array $run, array $row, ?string $actor): stri
     // Положенные попыткой жетоны уходят вместе с ней (внешний ключ run_marks.from_step_id).
     dbRun('DELETE FROM run_steps WHERE id = ?', [(int) $row['id']]);
 
-    $type = (string) dbValue('SELECT type FROM elements WHERE id = ?', [(int) $row['element_id']]);
+    $type = historyKind($row);
     return $address . ($type === 'decision' ? ta('agents.steps.suffix_decision') : ($untaken ? ta('agents.steps.suffix_issue') : ''));
 }
 
@@ -1378,7 +1405,7 @@ function runReset(): void
         [$project, $run] = runOwn(true);
         $runId = (int) $run['id'];
         runMove($run, 'reset');
-        runLiveGuard((int) $run['folder_id'], $runId);
+        runSceneLiveGuard($run);
         return runResetDo($project, $run);
     }, $repeated);
 
@@ -1489,14 +1516,12 @@ function stepTooFast(array $step): bool
 /** Должен ли шаг оставить след: выходы в схеме или платные вызовы. */
 function stepOwesTrace(array $step): bool
 {
-    $elementId = (int) ($step['element_id'] ?? 0);
-    if (!$elementId) return false;
-
-    $outputs = runProp($elementId, 'outputs', []);
+    if (!historyNode($step)) return false;
+    $run = !empty($step['block_id']) ? runRow((int) $step['run_id'], (int) $step['project_id']) : [];
+    $props = runStepProps($run, $step);
+    $outputs = $props['outputs'] ?? [];
     if (is_string($outputs)) $outputs = array_filter(array_map('trim', explode(',', $outputs)));
-    if (!empty($outputs)) return true;
-
-    return (int) runProp($elementId, 'paid_calls', 0) > 0;
+    return !empty($outputs) || (int) ($props['paid_calls'] ?? 0) > 0;
 }
 
 /** Остался ли след: сданные файлы или заявки сервисам. */
@@ -1525,7 +1550,7 @@ function stepInputRows(array $stepIds, array &$seen = []): array
 
     $in = implode(',', array_fill(0, count($stepIds), '?'));
     $rows = dbAll(
-        "SELECT s.id, s.element_no, s.result, e.title, e.type
+        "SELECT s.id, s.element_no, s.result, COALESCE(e.title, s.element_title) AS title, COALESCE(s.block_kind, e.type) AS type
            FROM run_steps s LEFT JOIN elements e ON e.id = s.element_id
           WHERE s.id IN ($in) ORDER BY s.id", $stepIds);
 

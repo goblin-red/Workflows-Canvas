@@ -27,6 +27,7 @@ export async function render(root, route) {
       { key: 'seconds', title: t('admin.w.duration'), type: 'num', render: (r) => fmt.dur(r.seconds) },
       { key: 'driver', title: t('admin.runs.led_by'), render: (r) => el('span', 'adm-faint', [r.driver, r.jev !== 'off' ? 'Jev' : ''].filter(Boolean).join(' · ')) },
       { key: 'started', title: t('admin.w.started'), type: 'date' },
+      { key: 'open', title: '', sort: false, render: (r) => outLink('↗', r.editorUrl || editorUrl(r.key, r.folderId)) },
     ],
     filters: [
       { label: t('admin.w.all'), test: () => true },
@@ -57,7 +58,7 @@ async function openRun(id, route) {
   };
 
   const body = el('div', '', [
-    el('div', 'adm-drawer-actions', [outLink(t('admin.runs.scheme_editor'), editorUrl(r.key, r.folderId)), stop]),
+    el('div', 'adm-drawer-actions', [outLink(t('admin.w.open_editor'), r.editorUrl || editorUrl(r.key, r.folderId)), stop]),
     kv({
       [t('admin.w.state')]: badge(r.state), [t('admin.runs.waiting_for')]: r.waitFor || undefined, [t('admin.w.project')]: r.project || r.key, [t('admin.w.scheme')]: r.folder || '—',
       [t('admin.w.steps_n')]: t('admin.runs.steps_value', { accepted: r.accepted, steps: r.steps }), [t('admin.w.failed_n')]: fmt.num(r.failed), [t('admin.w.returns')]: fmt.num(r.returned), [t('admin.w.rounds')]: fmt.num(r.rounds),

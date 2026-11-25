@@ -5,14 +5,11 @@
   if (!host) return;
   const base = new URL('.', script.src);
   const source = new URL(script.dataset.source, base);
-  const lang = script.dataset.lang === 'en' ? 'en' : 'ru';
+  const lang = 'en';
   if (lang === 'en') source.searchParams.set('lang', 'en');
-  const words = lang === 'en' ? {
+  const words = {
     loading: 'Loading the scheme…', unavailable: 'The scheme is unavailable', bad: 'Invalid response',
     failed: 'Could not load the scheme from Goblin. Refresh the page to try again.',
-  } : {
-    loading: 'Загрузка схемы…', unavailable: 'Схема недоступна', bad: 'Неверный ответ',
-    failed: 'Не удалось загрузить схему из Goblin. Обновите страницу, чтобы повторить загрузку.',
   };
   const status = document.createElement('p');
   status.textContent = words.loading;

@@ -12,19 +12,6 @@ import { fillProjects, newProject } from 'goblin/shell/projects.js';
 import { loadMine } from 'goblin/api/sync.js';
 import { t } from 'goblin/core/i18n.js';
 
-/** Язык агентов проекта: на нём инструкции ведущего и worker, задания прогона и встроенный ИИ. */
-function langFields(project, save) {
-  // Своя плашка выбора, как у прочих полей панели: названия языков — на своих языках.
-  const select = pick([{ key: 'ru', label: 'Русский' }, { key: 'en', label: 'English' }], project.lang || 'ru', false);
-  select.disabled = state.viewOnly;
-  select.onchange = async () => {
-    const was = project.lang || 'ru';
-    try { await save({ lang: select.value }); project.lang = select.value; }
-    catch { select.value = was; }   // причину уже показал общий обработчик ошибок api
-  };
-  return [field(t('editor.projview.agent_lang'), select), note(t('editor.projview.agent_lang_note'))];
-}
-
 /**
  * Где лежат материалы (только сайт): снята — у человека в папке схемы (in/), по умолчанию;
  * стоит — на сервере, с лимитами бесплатного аккаунта (решение хозяина 01.10.2026, shell/localdir.js::putFile).
@@ -70,7 +57,6 @@ export function projectCard(key, onEnter) {
       checkbox(t('editor.projview.strict'), project.strictChecks,
         (value) => save({ strictChecks: value }),
         t('editor.projview.strict_hint')),
-      ...langFields(project, save),
       ...filesFields(project, save),
       kv({ [t('editor.projview.link')]: '#p=' + key, [t('editor.projview.folders')]: (answer.folders || []).length, [t('editor.projview.next_no')]: project.nextNo }),
       enter,
@@ -90,7 +76,6 @@ export function projectSections({ open = false } = {}) {
       checkbox(t('editor.projview.strict'), state.project.strictChecks,
         (value) => api.post('project.update', { strictChecks: value }),
         t('editor.projview.strict_hint')),
-      ...langFields(state.project, (fields) => api.post('project.update', fields)),
       ...filesFields(state.project, (fields) => api.post('project.update', fields)),
       kv({ [t('editor.projview.link')]: '#p=' + state.project.key, [t('editor.projview.next_no')]: state.project.nextNo }),
     ], open));

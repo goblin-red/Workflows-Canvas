@@ -110,6 +110,14 @@ function activeGuardFolders(int $projectId, array $folderIds, string $what): voi
 
 function activeGuardProject(int $projectId, string $what): void
 {
+    $native = dbRow("SELECT id, `no`, parent_block_id FROM runs WHERE project_id = ?
+                      AND parent_block_id IS NOT NULL AND state IN ('running','paused') LIMIT 1", [$projectId]);
+    if ($native) {
+        $label = 'r' . (int) $native['no'];
+        throw new ApiError(t('server.guard.message', ['what' => activeGuardWhat($what), 'run' => $label]),
+            'conflict', ['code2' => 'active_run', 'active_run' => $label,
+                         'run' => (int) $native['id'], 'parent' => (int) $native['parent_block_id']]);
+    }
     $folders = array_map('intval', array_column(
         dbAll("SELECT folder_id FROM runs WHERE project_id = ? AND engine = 2 AND state IN ('running','paused')", [$projectId]),
         'folder_id'

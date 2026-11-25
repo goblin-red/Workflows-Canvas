@@ -2,9 +2,9 @@
    Отдаёт: t(), tn(), lang, setLang().
    Не делает: не грузит словари — страница кладёт их в window.GOBLIN_I18N (lib/core/i18n.php, langScript).
 
-   Ключ — «часть.место.смысл»: editor.settings.title. Нет перевода — русский текст, нет и его — сам ключ. */
+   Ключ — «часть.место.смысл»: editor.settings.title. Missing translations display the key. */
 
-const data = globalThis.GOBLIN_I18N || { lang: 'ru', dict: {} };
+const data = globalThis.GOBLIN_I18N || { lang: 'en', dict: {} };
 
 export const lang = data.lang;
 

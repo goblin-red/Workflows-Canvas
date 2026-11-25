@@ -202,7 +202,7 @@ function adminTokensCleanup(): array
 /** Язык правки каталога: ru — основные поля, другой (из LANGS) — перевод в поле i18n. */
 function adminCatalogLang(array $in): string
 {
-    $lang = (string) ($in['lang'] ?? 'ru');
+    $lang = (string) ($in['lang'] ?? 'en');
     if (!in_array($lang, LANGS, true)) throw new ApiError(t('admin.err.bad_lang'));
     return $lang;
 }
@@ -238,7 +238,7 @@ function adminTemplateUpdate(array $in): array
     $row = dbRow('SELECT * FROM templates WHERE id = ?', [$id]);
     if (!$row) throw new ApiError(t('admin.err.no_template'), 'not_found');
     $lang = adminCatalogLang($in);
-    if ($lang !== 'ru') {          // перевод: только название, описание и паспорт; раздел, порядок и отметки общие
+    if ($lang !== 'en') {          // перевод: только название, описание и паспорт; раздел, порядок и отметки общие
         adminCatalogI18nSave('templates', 'id', $id, (string) $row['i18n'], $lang, [
             'title' => mb_substr(trim((string) ($in['title'] ?? '')), 0, 255),
             'about' => mb_substr(trim((string) ($in['about'] ?? '')), 0, 512),
@@ -282,7 +282,7 @@ function adminTemplateFromFolder(array $in): array
         $row = dbRow('SELECT id, i18n FROM templates WHERE id = ?', [$id]);
         if (!$row) throw new ApiError(t('admin.err.no_template'), 'not_found');
         $lang = adminCatalogLang($in);
-        if ($lang !== 'ru') adminCatalogI18nSave('templates', 'id', $id, (string) $row['i18n'], $lang, ['body' => $body]);   // тело перевода
+        if ($lang !== 'en') adminCatalogI18nSave('templates', 'id', $id, (string) $row['i18n'], $lang, ['body' => $body]);   // тело перевода
         else dbRun('UPDATE templates SET body = ? WHERE id = ?', [$json, $id]);
         return ['say' => trim(t('admin.say.body_updated', ['name' => $folder['name'], 'n' => count($body['elements'])]) . ' ' . templateLost((int) $folder['id']))];
     }
@@ -305,7 +305,7 @@ function adminCategorySave(array $in): array
     $row = dbRow('SELECT * FROM template_categories WHERE `key` = ?', [$key]);
     if (!$row) throw new ApiError(t('admin.err.no_category'), 'not_found');
     $lang = adminCatalogLang($in);
-    if ($lang !== 'ru') {
+    if ($lang !== 'en') {
         adminCatalogI18nSave('template_categories', '`key`', $key, (string) $row['i18n'], $lang, [
             'title' => mb_substr(trim((string) ($in['title'] ?? '')), 0, 64),
             'about' => mb_substr(trim((string) ($in['about'] ?? '')), 0, 512),

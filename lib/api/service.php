@@ -202,7 +202,7 @@ function docsRunText(array $project, array $folder, array $check, array $leads, 
 
 /**
  * Текст задания на рисование (docs.run&role=draw): создать схему в пустой папке
- * или поправить ту, что уже на холсте. Правила — в рисование.md, здесь — параметры папки.
+ * или поправить ту, что уже на холсте. Правила — в drawing.md, здесь — параметры папки.
  */
 function docsDrawText(array $project, array $folder, array $check, array $agents,
                       string $api, string $site, string $key, ?array $busy = null): string
@@ -210,10 +210,10 @@ function docsDrawText(array $project, array $folder, array $check, array $agents
     $folderId = (int) $folder['id'];
     $name = (string) $folder['name'];
     $scheme = $site . '#p=' . $key . '&f=' . $folderId;
-    // Правила рисования — на языке агентов проекта: instructions/<язык>/рисование.md.
-    $drawMd = 'рисование.md';
+    // Правила рисования — на языке агентов проекта: instructions/<язык>/drawing.md.
+    $drawMd = 'drawing.md';
     $drawPath = langFile(config()['instructions_dir'], $drawMd, langAgents());
-    $rules = $api . '?op=docs.get&file=' . rawurlencode('рисование') . '&project=' . $key;
+    $rules = $api . '?op=docs.get&file=' . rawurlencode('drawing') . '&project=' . $key;
     $full = $api . '?op=folder.get&folder=' . $folderId . '&project=' . $key;
 
     // Что уже на холсте: по типам, без ярлыков.
@@ -315,7 +315,7 @@ function docsGet(): void
 {
     // leader и worker собирает сервер; рисование и правила ИИ — в instructions; утилита — в old.
     $file = (string) (input('file') ?? 'leader');
-    $aliases = ['lead' => 'leader', 'ведущий' => 'leader', 'воркер' => 'worker'];
+    $aliases = ['lead' => 'leader', 'ведущий' => 'leader', 'воркер' => 'worker', 'рисование' => 'drawing'];
     $file = $aliases[$file] ?? $file;
     if ($file === 'leader' || $file === 'worker') {
         $project = requireProject(false);
@@ -343,7 +343,7 @@ function docsGet(): void
         readfile(dirname(__DIR__, 2) . '/bin/lead-watch.sh');
         exit;
     }
-    $known = ['leader', 'worker', 'рисование', 'deepseek', 'legacy-lead', 'legacy-worker', 'lead-watch'];
+    $known = ['leader', 'worker', 'drawing', 'deepseek', 'lead-watch'];
     if (!in_array($file, $known, true)) {
         throw new ApiError(t('server.docs.available', ['list' => implode(', ', $known)]), 'not_found');
     }

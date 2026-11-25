@@ -1,0 +1,87 @@
+.first-steps-page main {
+  background: #fffdf9;
+  padding-inline: clamp(22px, 3.2vw, 52px);
+}
+
+.first-steps-page .breadcrumbs { margin-bottom: 20px; }
+
+.first-steps {
+  --course-ink: #211d19;
+  --course-muted: #5e574e;
+  --course-line: #e8e0d5;
+  --course-paper: #f7f0e5;
+  color: var(--course-ink);
+  overflow-wrap: break-word;
+}
+
+.first-steps .course-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  align-items: center;
+  overflow: hidden;
+  border-radius: 22px;
+  background: #1b1919;
+  color: #fffbf4;
+}
+
+.first-steps .course-hero-copy { padding: 58px clamp(22px, 3.2vw, 44px) 32px; }
+.first-steps .course-hero p { color: #e5d8c8; margin-bottom: 24px; }
+.first-steps .course-hero h1 { font-size: clamp(33px, 4vw, 60px); line-height: 1.03; letter-spacing: -.055em; margin-bottom: 18px; }
+.first-steps .course-hero img { display: block; width: 100%; height: 100%; max-height: 460px; object-fit: cover; object-position: center; }
+.first-steps .course-lang { position: absolute; z-index: 1; top: 15px; right: 16px; padding: 4px 11px; border-radius: 999px; background: #1b1919; color: #fffbf4; text-decoration: none; border: 1px solid #a69582; font-size: 13px; font-weight: 650; }
+.first-steps .course-lang:hover { background: #44382b; }
+.first-steps .course-button { display: inline-block; padding: 9px 16px; border-radius: 9px; background: #f5aa54; color: #251609; font-weight: 750; text-decoration: none; }
+.first-steps .course-button:hover { background: #ffc888; }
+.first-steps .course-hero a:focus-visible { outline-color: #fffbf4; }
+
+.first-steps .course-contents { display: flex; align-items: stretch; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+.first-steps .course-contents a { padding: 6px 13px; border: 1px solid var(--course-line); border-radius: 999px; font-size: 14px; font-weight: 650; color: #654722; text-decoration: none; }
+.first-steps .course-contents a:hover { background: var(--course-paper); }
+.first-steps .course-section { margin-top: clamp(42px, 5.7vw, 79px); }
+.first-steps .course-section h2 { font-size: clamp(26px, 3.4vw, 42px); line-height: 1.12; letter-spacing: -.038em; margin: 0 0 15px; }
+.first-steps .course-section > p, .first-steps .course-section > ol { max-width: 68ch; }
+.first-steps .course-section ol { padding-left: 24px; }
+.first-steps .course-section ol li { padding-left: 5px; }
+.first-steps .course-section ol li::marker { color: #734614; font-weight: 750; }
+
+.first-steps .course-hierarchy { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 10px; margin: 19px 0 14px; }
+.first-steps .course-hierarchy strong { background: var(--course-paper); padding: 5px 12px; border-radius: 7px; font-size: 14px; }
+.first-steps .course-hierarchy strong:last-child { background: #ddede2; color: #27483a; }
+.first-steps .course-hierarchy span { color: #795222; }
+
+.first-steps .course-shot { margin: 22px 0 0; }
+.first-steps .course-shot a { display: block; border-radius: 14px; }
+.first-steps .course-shot img { display: block; width: 100%; height: auto; border: 1px solid #403b36; border-radius: inherit; background: #1a1b20; }
+.first-steps .course-shot figcaption { font-size: 14px; color: var(--course-muted); margin: 8px 1px 0; }
+.first-steps .course-shot figcaption a { display: inline; }
+
+.first-steps .course-team { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 0; align-items: stretch; margin: 24px 0; background: var(--course-paper); border-radius: 16px; overflow: hidden; }
+.first-steps .course-team img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.first-steps .course-team div { padding: 17px clamp(16px, 2.5vw, 29px); }
+.first-steps .course-team h3 { margin: 0 0 8px; }
+.first-steps .course-team p { margin: 0; }
+.first-steps .course-team p + p { margin-top: 9px; }
+.first-steps .course-branch { border: 1px solid #d2dfd2; border-radius: 15px; background: #edf4ec; padding: clamp(17px, 2.7vw, 30px); margin-top: 23px; }
+.first-steps .course-branch h3 { margin: 0 0 8px; }
+.first-steps .course-branch p { margin-bottom: 12px; }
+.first-steps .course-branches { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.first-steps .course-branches span { border: 1px solid #cadccf; background: #fffdf9; padding: 4px 10px; border-radius: 7px; font-size: 14px; }
+.first-steps .course-branches strong { color: #325940; }
+.first-steps .course-finish { padding-top: 28px; border-top: 1px solid var(--course-line); }
+.first-steps .course-finish .course-button { margin-top: 4px; }
+
+@media (max-width: 850px) {
+  .first-steps-page .layout { display: flex; flex-direction: column; }
+  .first-steps-page main { order: -1; width: 100%; min-height: 0; }
+  .first-steps-page aside { width: 100%; border-top: 1px solid var(--course-line, #e8e0d5); }
+}
+
+@media (max-width: 600px) {
+  .first-steps-page main { padding: 20px 16px 42px; }
+  .first-steps .course-hero, .first-steps .course-team { grid-template-columns: minmax(0, 1fr); }
+  .first-steps .course-hero-copy { padding: 54px 20px 24px; }
+  .first-steps .course-hero img { grid-row: 2; max-height: 270px; aspect-ratio: 3 / 2; }
+  .first-steps .course-team img { max-height: 230px; }
+  .first-steps .course-shot img { border-radius: 9px; }
+}

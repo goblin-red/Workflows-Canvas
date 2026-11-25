@@ -27,7 +27,7 @@
 #  {папка} — рабочая папка прогона, {модель} и {усилие} — из карточки агента.
 #  Пропуск шага уходит переменной окружения.
 [cli]
-claude   = Claude Code | blue   | claude-opus-5-5[low, medium, high, xhigh], opus-5[low, medium, high, xhigh], sonnet-5[low, medium, high], haiku-4.5[normal] | claude -p "прочитай {пакет} и работай по нему"
+claude   = Claude Code | blue   | claude-opus-5-5[low, medium, high, xhigh], opus-5[low, medium, high, xhigh], sonnet-5[low, medium, high], haiku-4.5[normal] | claude -p "read {package} and follow its instructions"
 codex    = Codex | red          | gpt-6-sol, 5.6, 5.5, gpt-5.6-luna
 grok     = Grok CLI | cyan      | grok-4.7, 4.6, 4.5
 gemini   = Gemini CLI | teal    | 3-pro, 3-flash
@@ -71,37 +71,37 @@ strict    = Strict
 #  Произвольный HEX сервер не принимает: тогда цвет не переживает
 #  смену темы и не читается на экспорте.
 [colors]
-blue   = Синий
-green  = Зелёный
-teal   = Бирюзовый
-purple = Фиолетовый
-red    = Красный
-orange = Оранжевый
-yellow = Жёлтый
-pink   = Розовый
-cyan   = Голубой
-lime   = Лаймовый
-brown  = Коричневый
-gray   = Серый
+blue   = Blue
+green  = Green
+teal   = Teal
+purple = Purple
+red    = Red
+orange = Orange
+yellow = Yellow
+pink   = Pink
+cyan   = Cyan
+lime   = Lime
+brown  = Brown
+gray   = Gray
 
 
 #  Типы ассетов: чем открывать материал. Список расширяется прямо
 #  здесь, без миграции базы — поле kind у ассета обычная строка.
 [asset_kinds]
-text    = Текст
-spec    = ТЗ
-code    = Код
-image   = Картинка
-video   = Видео
-audio   = Звук
+text    = Text
+spec    = Task specification
+code    = Code
+image   = Image
+video   = Video
+audio   = Audio
 pdf     = PDF
-doc     = Документ
-table   = Таблица
-archive = Архив
-model   = 3D-модель
-file    = Файл
-folder  = Папка
-link    = Ссылка
+doc     = Document
+table   = Table
+archive = Archive
+model   = 3D model
+file    = File
+folder  = Folder
+link    = Link
 
 
 #  Дополнительные свойства элемента («допы»). Слева ключ, справа
@@ -111,23 +111,23 @@ link    = Ссылка
 #  Первые пять читает сервер — это правила прогона. Остальные он
 #  не толкует, они просто показываются человеку и ищутся.
 [props]
-join         = Как ждать входы | select | all, any
-max_attempts = Сколько попыток | number
-outputs      = Обязательные выходы | list
-paid_calls   = Платных вызовов на шаг | number
-timeout      = Сколько ждать worker | number
-expr         = Выражение | text
-cond         = Условие | text
-answer       = Образец ответа | text
-tag          = Метка | text
-number       = Номер или код | text
-badges       = Значки | list
-rows         = Строки | list
-indexes      = Указатели | list
-accept       = Что должно быть правдой | list
-reject       = Чего быть не должно | list
-judge        = Кто принимает этот блок | select | human
-trust_form   = Хватит совпадения с образцом | bool
+join         = Input handling | select | all, any
+max_attempts = Maximum attempts | number
+outputs      = Required outputs | list
+paid_calls   = Paid calls per step | number
+timeout      = Worker timeout | number
+expr         = Expression | text
+cond         = Condition | text
+answer       = Answer format | text
+tag          = Tag | text
+number       = Number or code | text
+badges       = Badges | list
+rows         = Rows | list
+indexes      = Indexes | list
+accept       = Requirements | list
+reject       = Disqualifying conditions | list
+judge        = Reviewer for this block | select | human
+trust_form   = Accept a format match | bool
 
 
 #  Насколько резко колесо и трекпад меняют масштаб холста.

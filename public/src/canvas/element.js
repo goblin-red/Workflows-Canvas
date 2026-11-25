@@ -37,10 +37,8 @@ export function drawElement(element) {
         <div class="node-badges"></div>
         <div class="node-data"></div>
         <div class="node-result" hidden></div>
-        <!-- Итог формальных проверок сданного шага: смотреть перед приёмкой. -->
         <div class="node-review" hidden></div>
-        <!-- Агент — внизу карточки: сверху читают название, а не исполнителя. -->
-        <div class="node-brick" hidden><svg class="brick-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="2.5"/><path d="M12 4v4M9 13h.01M15 13h.01M9.5 16.5h5"/></svg><span class="node-brick-name"></span><button class="node-brick-x" title="Снять исполнителя с блока">✕</button></div>
+        <div class="node-brick" hidden><svg class="brick-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="2.5"/><path d="M12 4v4M9 13h.01M15 13h.01M9.5 16.5h5"/></svg><span class="node-brick-name"></span><button class="node-brick-x" title="Remove the worker from this block">✕</button></div>
       </div>
     </div>
     <span class="node-yes" hidden>${t('editor.canvas.yes_caps')}</span>

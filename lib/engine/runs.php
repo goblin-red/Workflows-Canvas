@@ -60,7 +60,7 @@ function runRow(int $id, int $projectId): array
 
 function runShape(array $row): array
 {
-    return [
+    $out = [
         'id'        => (int) $row['id'],
         'no'        => (int) $row['no'],
         'label'     => 'r' . (int) $row['no'],
@@ -84,6 +84,11 @@ function runShape(array $row): array
         'showPause' => (float) ($row['show_pause'] ?? 0),
         'waitFor'   => (string) ($row['wait_for'] ?? ''),
     ];
+    if (!empty($row['parent_block_id'])) {
+        $out['folder'] = null;
+        $out['parent'] = (int) $row['parent_block_id'];
+    }
+    return $out;
 }
 
 /** Живой (running, paused) прогон папки или null. $exceptRunId — этот прогон не считать. */
@@ -129,20 +134,30 @@ function runStart(): void
     $repeated = false;
 
     $out = engineCommand(static function () use ($project, $projectId, &$runId): array {
-        $folderId = inputInt('folder');
-        $folder = folderRow((int) $folderId, $projectId);
-
-        runLiveGuard((int) $folder['id']);
-        // Та же предпроверка, что у begin, и вход схемы — под замком, до записи прогона и пропуска.
-        $check = folderPrecheck($folder);
+        $parent = runParentAsked();
+        $graph = null;
+        if ($parent !== null) {
+            $graph = nativeScene($projectId, $parent);
+            $folder = $graph['settings'];
+            runSceneLiveGuard(['project_id' => $projectId, 'parent_block_id' => $parent]);
+        } else {
+            $folder = folderRow((int) inputInt('folder'), $projectId);
+            runLiveGuard((int) $folder['id']);
+        }
+        $check = folderPrecheck($folder, $graph);
         if (!$check['ready']) {
             throw new ApiError(ta('agents.runs.not_ready', ['list' => implode('; ', array_map('precheckSay', $check['problems']))]),
                 'conflict', ['problems' => $check['problems']]);
         }
-        $start = runStartEntry($check['entries']);
+        $start = runStartEntry($check['entries'], $graph);
 
         $leadId = null;
         if ($lead = inputInt('lead')) {
+            if ($graph) {
+                $allowed = $graph['agents'][$lead] ?? null;
+                if (!$allowed || $allowed['role'] !== 'lead') throw new ApiError(ta('agents.runs.lead_only_role'), 'scope');
+                $lead = (int) $allowed['id'];
+            }
             $agent = agentRow($lead, $projectId);
             if ($agent['role'] !== 'lead') throw new ApiError(ta('agents.runs.lead_only_role'));
             $leadId = (int) $agent['id'];
@@ -158,25 +173,25 @@ function runStart(): void
         $no = nextRunNo($projectId);
         $rev = bumpRev($projectId);
         // engine = 2: жетоны строками в run_marks. Старые прогоны остаются на engine = 1.
-        dbRun(
-            'INSERT INTO runs (project_id, folder_id, `no`, title, lead_agent_id, started_by, work_dir, work_url, rev,
-                               engine, driver, judge, jev, show_pause)
-             VALUES (?,?,?,?,?,?,?,?,?,2,?,?,?,?)',
-            [$projectId, $folder['id'], $no, (string) (input('title') ?? $folder['name']),
-             $leadId, caller()['user_id'], $folder['work_dir'], $folder['work_url'], $rev,
-             $driver, $judge, $jev, $pause]
-        );
-        $runId = dbId();
-        runTouch($runId);
-        runOutDir(['work_dir' => $folder['work_dir'], 'no' => $no]);   // папка результатов out/rN
+        if ($graph) nativeWorkFolders((string) $folder['work_dir'], $no, $projectId);
+        $values = [
+            'project_id' => $projectId, 'folder_id' => $parent === null ? $folder['id'] : null,
+            '`no`' => $no, 'title' => (string) (input('title') ?? $folder['name']),
+            'lead_agent_id' => $leadId, 'started_by' => caller()['user_id'],
+            'work_dir' => $folder['work_dir'], 'work_url' => $folder['work_url'], 'rev' => $rev,
+            'engine' => 2, 'driver' => $driver, 'judge' => $judge, 'jev' => $jev, 'show_pause' => $pause,
+        ];
+        if ($graph) $values += [
+            'parent_block_id' => $parent,
+            'graph_snapshot' => json_encode($graph, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+        ];
+        $run = runInsert($values, $folder, $start, 'human', $parent === null);
+        $runId = (int) $run['id'];
 
         $token = tokenIssue('run', [
             'project_id' => $projectId, 'run_id' => $runId, 'agent_id' => $leadId,
             'created_by' => caller()['user_id'],
-        ], 'прогон r' . $no);
-
-        $run = runRow($runId, $projectId);
-        runStartEvent($run, $folder, $start, 'human');
+        ], 'run r' . $no);
 
         return [
             'run'   => runShape($run),
@@ -193,12 +208,25 @@ function runStart(): void
     reply($out);
 }
 
+/** Общая запись начала. Вызывается под замком после проверки сцены. */
+function runInsert(array $values, array $folder, array $start, string $actor, bool $legacyDir = false): array
+{
+    dbRun('INSERT INTO runs (' . implode(', ', array_keys($values)) . ') VALUES ('
+        . implode(',', array_fill(0, count($values), '?')) . ')', array_values($values));
+    $id = dbId();
+    runTouch($id);
+    $run = runRow($id, (int) $values['project_id']);
+    if ($legacyDir) runOutDir($run);
+    runStartEvent($run, $folder, $start, $actor);
+    return $run;
+}
+
 /**
  * С какого узла начать: только со входа схемы (graphEntries) — стартера или единственного
  * узла без входа. Несколько входов первым не выбираются; `from` не вход — отказ 422
  * с номером входа. $entries — входы предпроверки. Отдаёт строку элемента.
  */
-function runStartEntry(array $entries): array
+function runStartEntry(array $entries, ?array $graph = null): array
 {
     $nos = array_map(static fn(array $one): int => (int) $one['no'], $entries);
     if (count($entries) !== 1) {
@@ -208,7 +236,8 @@ function runStartEntry(array $entries): array
     if ($from && $from !== $nos[0]) {
         throw new ApiError(ta('agents.runs.from_not_entry', ['from' => $from, 'no' => $nos[0]]), 'invalid', ['entries' => $nos]);
     }
-    return dbRow('SELECT * FROM elements WHERE id = ?', [(int) $entries[0]['id']]);
+    $id = (int) $entries[0]['id'];
+    return $graph ? $graph['nodes'][$id] : dbRow('SELECT * FROM elements WHERE id = ?', [$id]);
 }
 
 /** Настройка прогона из запроса: только из списка, иначе — значение по умолчанию. */
@@ -260,7 +289,7 @@ function serviceDirMake(string $dir): string
     $deny = dirname(rtrim($dir, '/')) . '/service/.htaccess';
     if (is_dir(dirname($deny)) && !is_file($deny)) {
         @file_put_contents($deny,
-            "# Служебное прогона (пакеты, журналы) — только для сервера и CLI, не для браузера.\n"
+            "# Run service files are available to the server and CLI only.\n"
             . "Require all denied\n");
     }
     return $dir;
@@ -316,7 +345,7 @@ function folderTreePath(array $folder): string
     array_unshift($parts, $named((string) ($project['title'] ?? ''), (int) ($project['id'] ?? 0)));
     array_unshift($parts, !empty($project['owner_id'])
         ? $named((string) ($project['name'] ?: strtok((string) $project['email'], '@')), (int) $project['owner_id'])
-        : 'гости');
+        : 'guests');
     return implode('/', $parts);
 }
 
@@ -361,18 +390,20 @@ function runGet(): void
 
     $runId = $who['run_id'] ?: runAsked($projectId);
     if (!$runId) {
+        $parent = runParentAsked();
         $folderId = inputInt('folder');
 
         // Ни прогона, ни папки — отдаём живые прогоны проекта. Этим живёт
         // сторож: один процесс смотрит за всем проектом, а не за одним прогоном.
-        if (!$folderId) {
+        if (!$folderId && $parent === null) {
             $rows = dbAll(
                 "SELECT * FROM runs WHERE project_id = ? AND state IN ('running','paused') ORDER BY id",
                 [$projectId]
             );
             reply(['runs' => array_map('runShape', $rows), 'now' => dbNow()]);
         }
-        $rows = dbAll('SELECT * FROM runs WHERE project_id = ? AND folder_id = ? ORDER BY id DESC LIMIT 50', [$projectId, $folderId]);
+        $column = $parent === null ? 'folder_id' : 'parent_block_id';
+        $rows = dbAll("SELECT * FROM runs WHERE project_id = ? AND $column = ? ORDER BY id DESC LIMIT 50", [$projectId, $parent ?? $folderId]);
         // Сколько шагов в каждом: пустой прогон не должен затирать картину
         // на холсте — экран сам выберет тот, где что-то происходило.
         // Один запрос на все прогоны, а не два на каждый.
@@ -451,7 +482,7 @@ function runResume(): void
         [$project, $run] = runOwn(true);
         $runId = (int) $run['id'];
         $to = (string) runMove($run, 'resume');
-        runLiveGuard((int) $run['folder_id'], $runId);
+        runSceneLiveGuard($run);
         runSetState((int) $run['id'], $to, (int) $project['id']);
         runTouch((int) $run['id']);
         runMarkEvent($run, 'resume', ta('agents.runs.ev_resumed'));
@@ -579,7 +610,7 @@ function runAttach(): void
             'project_id' => $projectId, 'run_id' => (int) $run['id'],
             'agent_id' => $run['lead_agent_id'] ? (int) $run['lead_agent_id'] : null,
             'created_by' => caller()['user_id'],
-        ], 'прогон r' . $run['no']);
+        ], 'run r' . $run['no']);
 
         $steps = dbAll("SELECT * FROM run_steps WHERE run_id = ? AND state IN ('issued','running','submitted') ORDER BY id", [$run['id']]);
         return ['run' => runShape($run), 'token' => $token['secret'], 'open' => array_map('stepShape', $steps)];
@@ -663,7 +694,7 @@ function runStartEvent(array $run, array $folder, array $start, string $actor): 
         'project_id' => (int) $run['project_id'], 'run_id' => (int) $run['id'], 'kind' => 'start', 'actor' => $actor,
         'agent_id'   => $run['lead_agent_id'] ? (int) $run['lead_agent_id'] : null,
         'title' => ta('agents.runs.ev_started', ['run' => "r{$run['no']}", 'name' => $folder['name'], 'no' => $start['no']]),
-        'meta'  => ['folder' => (int) $folder['id'], 'workDir' => (string) $folder['work_dir']]
+        'meta'  => [(!empty($run['parent_block_id']) ? 'parent' : 'folder') => (int) $folder['id'], 'workDir' => (string) $folder['work_dir']]
             + ($from ? ['from_run' => $from['from_run'], 'from_step' => $from['from_step']] : []),
     ]);
 }
@@ -679,7 +710,15 @@ function runStartEvent(array $run, array $folder, array $start, string $actor): 
  */
 function runArrival(array $run): ?array
 {
-    $passes = dbAll(
+    $passes = !empty($run['parent_block_id']) ? dbAll(
+        "SELECT s.id, s.run_id, s.vars, r.`no`, r.work_dir, r.title AS name FROM run_steps s
+           JOIN runs r ON r.id = s.run_id
+          WHERE s.project_id = ? AND s.block_kind = 'gateway' AND s.state = 'accepted'
+            AND (s.delivered_run_id IS NULL OR s.delivered_run_id = ?)
+            AND EXISTS (SELECT 1 FROM run_events ev WHERE ev.run_id = s.run_id AND ev.step_id = s.id
+                         AND ev.kind = 'pass' AND CAST(JSON_EXTRACT(ev.meta, '$.target_parent') AS CHAR) = CAST(? AS CHAR))
+          ORDER BY s.id LIMIT 50",
+        [(int) $run['project_id'], (int) $run['id'], (int) $run['parent_block_id']]) : dbAll(
         "SELECT s.id, s.run_id, s.vars, r.`no`, r.work_dir, f.name FROM run_steps s
            JOIN elements e ON e.id = s.element_id AND e.type = 'gateway' AND e.target_folder_id = ?
            JOIN runs r ON r.id = s.run_id

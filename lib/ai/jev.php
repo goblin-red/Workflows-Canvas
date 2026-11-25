@@ -254,17 +254,27 @@ function stepJev(): void
 
     $projectId = (int) $project['id'];
     $runId     = (int) $run['id'];
-    $no        = inputInt('no');
-    if (!$no) throw new ApiError(t('agents.ai.jev_which'));
-
-    $element = dbRow('SELECT * FROM elements WHERE project_id = ? AND `no` = ?', [$projectId, $no]);
-    if (!$element) throw new ApiError(t('agents.ai.jev_no_element', ['no' => $no]), 'not_found');
+    $native = !empty($run['parent_block_id']);
+    $graph = $native ? runScene($run) : null;
+    if ($native) {
+        $element = runElementAsked($run);
+        $no = $element['no'] ?? inputInt('no');
+    } else {
+        $no = inputInt('no');
+        if (!$no) throw new ApiError(t('agents.ai.jev_which'));
+        $element = dbRow('SELECT * FROM elements WHERE project_id = ? AND `no` = ?', [$projectId, $no]);
+    }
+    if (!$element) throw new ApiError(t('agents.ai.jev_no_element', ['no' => $no ?? 0]), 'not_found');
 
     $branch = (string) $element['type'] === 'decision';
+    if ($branch && $native && !graphBinaryBranches($graph, (int) $element['id'])) {
+        throw new ApiError(branchMessage('unknown'), 'conflict', ['code2' => 'manual_branch']);
+    }
     $step   = null;
 
     if ($branch) {
-        $cond = trim((string) (input('cond') ?? runProp((int) $element['id'], 'cond', '')));
+        $cond = trim((string) (input('cond') ?? ($native ? ($element['props']['cond'] ?? '')
+            : runProp((int) $element['id'], 'cond', ''))));
         if ($cond === '') $cond = (string) $element['title'];
 
         $earlier = stepEarlier($runId);
@@ -279,14 +289,14 @@ function stepJev(): void
             throw new ApiError(t('agents.ai.jev_only_submitted'), 'conflict', ['code2' => 'not_submitted']);
         }
 
-        $state = jevStepState($step, [
+        $package = $native ? stepPackage($step, $projectId) : [
             'spec'    => specText('element_id', (int) $element['id']),
             'task'    => taskMeaningText(taskMeaning((int) $element['id'])),
             'inputs'  => stepInputs((int) $element['id']),
             'earlier' => stepEarlier($runId),
-            'files'   => jevFilesOf((int) $step['id']),
             'answer'  => (string) runProp((int) $element['id'], 'answer', ''),
-        ]);
+        ];
+        $state = jevStepState($step, $package + ['files' => jevFilesOf((int) $step['id'])]);
         $asked = ta('agents.ai.ev_jev_ask_step', ['task' => "{$step['element_no']}.{$step['attempt']}"]);
     }
 

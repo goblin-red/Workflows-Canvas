@@ -49,7 +49,7 @@ function advanceAfter(int $runId): ?array
         // bounded deterministic ход; Jev подхватит явный driver run.advance.
         $out = engineAdvance($runId, false);
     } catch (Throwable $e) {
-        error_log('[goblin] ход движка: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+        error_log('[goblin] engine advance: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
         return ['did' => [], 'waitFor' => '', 'wakeIn' => null, 'error' => ta('agents.advance.engine_failed') . $e->getMessage()];
     }
     return ($out['did'] || $out['waitFor'] !== '' || $out['wakeIn'] !== null) ? $out : null;
@@ -164,7 +164,7 @@ function advanceWake(array $run): float
 function advanceLoad(array $run): array
 {
     return [
-        'graph' => engineGraph((int) $run['folder_id']),
+        'graph' => runScene($run),
         'steps' => dbAll('SELECT * FROM run_steps WHERE run_id = ? ORDER BY id', [(int) $run['id']]),
         'free'  => marksFree((int) $run['id']),
     ];
@@ -180,7 +180,7 @@ function advanceNeedsRequest(array $project, array $run, ?array $steps = null, ?
     if ($run['next_move_at'] !== null) return advanceWake($run) <= 0;
 
     $steps ??= dbAll('SELECT * FROM run_steps WHERE run_id = ? ORDER BY id', [(int) $run['id']]);
-    $graph ??= engineGraph((int) $run['folder_id']);
+    $graph ??= runScene($run);
 
     foreach ($steps as $step) {
         if ($step['state'] !== 'submitted') continue;
@@ -234,7 +234,7 @@ function advanceLive(array $steps): array
     $live = [];
     foreach ($steps as $step) {
         if (in_array($step['state'], ['issued', 'running', 'submitted', 'accepted'], true)) {
-            $live[(int) $step['element_id']] = true;
+            $live[(int) historyNode($step)] = true;
         }
     }
     return $live;
@@ -370,14 +370,27 @@ function advanceDecide(array $run, array $ctx, bool $act, bool $allowJev = true)
 
         $lead = advanceLeadRun($run);
         $cond = trim((string) graphProp($graph, $id, 'cond', ''));
+        $binary = graphBinaryBranches($graph, $id);
         // Прогон leader спрашивает Jev и по ТЗ ромба — условие-формула не обязательно.
-        if ($cond === '' && !$lead) { $waits[] = ta('agents.advance.wait_decision', ['no' => $no]); continue; }
+        if ($binary && $cond === '' && !$lead) { $waits[] = ta('agents.advance.wait_decision', ['no' => $no]); continue; }
 
         $pick = marksChoose($node, $graph, $ctx['free'], isset($live[$id]));
         if ($pick === null) continue;
         $in = varsFromMarks($pick['marks']);
         // У прогона leader числа не в ходу: разобранные из текста, они не повод стоять.
-        if ($in['clash'] && !$lead) { $waits[] = ta('agents.advance.clash', ['no' => $no, 'list' => implode(', ', array_keys($in['clash']))]); continue; }
+        if ($in['clash'] && (!$lead || !$binary)) { $waits[] = ta('agents.advance.clash', ['no' => $no, 'list' => implode(', ', array_keys($in['clash']))]); continue; }
+
+        if (!$binary) {
+            $ids = array_unique(array_column($pick['marks'], 'from_step_id'));
+            $data = implode("\n", array_column(stepInputRows($ids), 'result'));
+            $choice = graphEvaluateBranches($graph, $id, $in['vars'], $data);
+            if ($choice['edge'] === null) {
+                $waits[] = ta('agents.advance.decision_why', ['no' => $no, 'why' => branchMessage($choice['status'])]);
+                continue;
+            }
+            if ($act) return advanceTakeDecision($run, $node, $choice['edge'], $choice['why'], $pick, 'script');
+            continue;
+        }
 
         // Условие и текст ответа на входе: для слов «содержит …» и для вопроса Jev.
         $ask = advanceBranchQuestion($run, $graph, $id, $pick['marks']);
@@ -402,18 +415,24 @@ function advanceDecide(array $run, array $ctx, bool $act, bool $allowJev = true)
         if (!$act) continue;
 
         $branch = $ev['value'] ? 'yes' : 'no';
-        $arrow = null;
-        foreach (graphOut($graph, $id) as $edgeId) {
-            if ((string) $graph['edges'][$edgeId]['branch'] === $branch) { $arrow = $graph['edges'][$edgeId]; break; }
+        $choice = graphSelectBranch($graph, $id, $branch);
+        if (!$choice['edge']) {
+            $waits[] = $choice['status'] === 'ambiguous' ? branchMessage('ambiguous')
+                : ta('agents.advance.no_exit', ['no' => $no, 'branch' => ta('agents.advance.' . $branch)]);
+            continue;
         }
-        if (!$arrow) { $waits[] = ta('agents.advance.no_exit', ['no' => $no, 'branch' => ta($branch === 'yes' ? 'agents.advance.yes' : 'agents.advance.no')]); continue; }
-
-        $element = dbRow('SELECT * FROM elements WHERE id = ?', [$id]);
-        $made = stepDecideDo($run, $element, $arrow, $branch, $ev['why'], $pick, 'script');
-        return ['did' => ['kind' => 'decide', 'step' => $made['element_no'] . '.' . $made['attempt'],
-                          'branch' => $branch, 'why' => $ev['why']], 'waits' => []];
+        return advanceTakeDecision($run, $node, $choice['edge'], $ev['why'], $pick, 'script');
     }
     return ['did' => null, 'waits' => $waits];
+}
+
+function advanceTakeDecision(array $run, array $node, array $arrow, string $why, array $pick, string $actor): array
+{
+    $made = stepDecideDo($run, $node, $arrow, $why, $pick, $actor);
+    $did = ['kind' => 'decide', 'step' => $made['element_no'] . '.' . $made['attempt'],
+        'branch' => $arrow['branch'], 'why' => $why];
+    if (!empty($run['parent_block_id']) || isset($arrow['arrow_id'])) $did += ['edge' => $arrow['arrow_id'] ?? (int) $arrow['id'], 'label' => branchLabel($arrow)];
+    return ['did' => $did, 'waits' => []];
 }
 
 /**
@@ -445,7 +464,7 @@ function advanceBranchQuestion(array $run, array $graph, int $id, array $marks):
     }
 
     // Условия-формулы нет — задание ромба в его ТЗ, а пустое — в описании.
-    if ($cond === '') $cond = taskText($id);
+    if ($cond === '') $cond = runTaskText($graph, $id);
     $answers = array_map(static fn(array $one) => ta('agents.advance.answer_row', ['no' => $one['no'], 'title' => $one['title'], 'result' => $one['result']]),
         stepInputRows($fromIds));
     return ['cond' => $cond, 'data' => implode("\n", $answers)];
@@ -459,7 +478,7 @@ function advanceJevBranch(array $run, array $graph, array $item, array $node, ar
         'scope' => 'branch', 'run' => (int) $run['id'], 'element' => (int) $item['id'],
         'mode' => (string) $run['jev'],
         'marks' => array_map(static fn(array $m): array => [
-            'id' => (int) $m['id'], 'edge' => (int) $m['edge_id'],
+            'id' => (int) $m['id'], 'edge' => historyArrow($m),
             'fromStep' => (int) $m['from_step_id'], 'pass' => (int) $m['pass'],
         ], $pick['marks']),
     ];
@@ -471,20 +490,13 @@ function advanceJevBranch(array $run, array $graph, array $item, array $node, ar
         $meta = json_decode((string) $cached['meta'], true) ?: [];
         $verdict = (string) ($meta['verdict'] ?? 'unsure');
         if ($act && in_array($verdict, ['yes', 'no'], true)) {
-            $arrow = null;
-            foreach (graphOut($graph, (int) $item['id']) as $edgeId) {
-                if ((string) $graph['edges'][$edgeId]['branch'] === $verdict) {
-                    $arrow = $graph['edges'][$edgeId];
-                    break;
-                }
+            $choice = graphSelectBranch($graph, (int) $item['id'], $verdict);
+            if (!$choice['edge']) {
+                return ['did' => null, 'waits' => [$choice['status'] === 'ambiguous' ? branchMessage('ambiguous')
+                    : ta('agents.advance.no_exit_jev', ['no' => $item['no']])]];
             }
-            if (!$arrow) return ['did' => null, 'waits' => [ta('agents.advance.no_exit_jev', ['no' => $item['no']])]];
-            $element = dbRow('SELECT * FROM elements WHERE id = ?', [(int) $item['id']]);
-            $made = stepDecideDo($run, $element, $arrow, $verdict,
+            return advanceTakeDecision($run, $node, $choice['edge'],
                 (string) ($meta['reason'] ?? ta('agents.advance.jev_ruling')), $pick, 'judge');
-            return ['did' => ['kind' => 'decide', 'step' => $made['element_no'] . '.' . $made['attempt'],
-                              'branch' => $verdict, 'why' => (string) ($meta['reason'] ?? ta('agents.advance.jev_ruling'))],
-                    'waits' => []];
         }
         return ['did' => null, 'waits' => [ta('agents.advance.decision_why', ['no' => $item['no'], 'why' => (string) ($meta['reason'] ?? ta('agents.advance.jev_unsure'))])],
                 'cachedBranch' => $verdict, 'branchPlan' => $plan];
@@ -577,11 +589,11 @@ function advanceIssue(array $run, array $ctx, bool $act): array
             if (!$act) continue;
             $pick = marksChoose($graph['nodes'][$id], $graph, $ctx['free'], false);
             if ($pick === null) continue;
-            $step = stepStarterDo($run, dbRow('SELECT * FROM elements WHERE id = ?', [$id]), $pick, 'script');
+            $step = stepStarterDo($run, $graph['nodes'][$id], $pick, 'script');
             return ['did' => ['kind' => 'accept', 'step' => $no . '.' . $step['attempt'], 'starter' => true], 'waits' => []];
         }
 
-        $tries = array_values(array_filter($ctx['steps'], static fn(array $s) => (int) $s['element_id'] === $id));
+        $tries = array_values(array_filter($ctx['steps'], static fn(array $s) => (int) historyNode($s) === $id));
         usort($tries, static fn(array $a, array $b) => (int) $b['attempt'] <=> (int) $a['attempt']);
         $last = $tries[0] ?? null;
 
@@ -595,13 +607,13 @@ function advanceIssue(array $run, array $ctx, bool $act): array
         $node    = $graph['nodes'][$id];
         /* Карточка агента — подсказка. worker на карточке (и среда с карточками) —
            шаг ему; нет worker или стоит ведущий — шаг без агента, делает ведущий. */
-        $cards   = folderUsesAgentCards((int) $run['folder_id']);
+        $cards = !empty($graph['native']) || folderUsesAgentCards((int) $run['folder_id']);
         $agentId = $cards && $node['agent_id'] ? (int) $node['agent_id'] : 0;
-        $role    = $agentId ? (string) dbValue('SELECT role FROM agents WHERE id = ?', [$agentId]) : '';
+        $role    = $agentId ? (string) dbValue('SELECT role FROM agents WHERE id = ? AND project_id = ?', [$agentId, (int) $run['project_id']]) : '';
         if ($role !== 'worker') $agentId = 0;
 
-        $spec = specText('element_id', $id);
-        if (taskText($id) === '') { $waits[] = ta('agents.advance.block_no_spec', ['no' => $no]); continue; }
+        $spec = runTaskSpec($graph, $id);
+        if (runTaskText($graph, $id) === '') { $waits[] = ta('agents.advance.block_no_spec', ['no' => $no]); continue; }
 
         $attempt = stepNextAttempt((int) $run['id'], (int) $no);
         $max = graphMaxAttempts($graph, $id);
@@ -611,8 +623,7 @@ function advanceIssue(array $run, array $ctx, bool $act): array
 
         $pick = marksChoose($node, $graph, $ctx['free'], isset($live[$id]));
         if ($pick === null) continue;
-        $element = dbRow('SELECT * FROM elements WHERE id = ?', [$id]);
-        $step = stepIssue($run, $element, $pick, $agentId ?: null, $spec, $attempt, '', 'script');
+        $step = stepIssue($run, $node, $pick, $agentId ?: null, $spec, $attempt, '', 'script');
         $agent = (string) dbValue('SELECT name FROM agents WHERE id = ?', [$agentId]);
         return ['did' => ['kind' => 'open', 'step' => $no . '.' . $step['attempt'], 'agent' => $agent], 'waits' => []];
     }
@@ -741,7 +752,7 @@ function advanceJevStepPlanCurrent(int $runId, int $stepId): ?array
     $step = dbRow('SELECT * FROM run_steps WHERE id = ? AND run_id = ?', [$stepId, $runId]);
     if (!$run || !$step || $run['state'] !== 'running' || $step['state'] !== 'submitted') return null;
     $project = dbRow('SELECT * FROM projects WHERE id = ?', [(int) $run['project_id']]);
-    $graph = engineGraph((int) $run['folder_id']);
+    $graph = runScene($run);
     $formal = judgeFormal($project, $run, $step, $graph);
     $package = judgePackage($run, $step, $graph);
     return ['run' => $run, 'step' => $step,
@@ -762,7 +773,7 @@ function advanceJevBranchPlanCurrent(int $runId, int $elementId): ?array
     foreach (readyList($run, $graph, $ctx['steps']) as $one) {
         if ((int) $one['id'] === $elementId && $one['type'] === 'decision') { $item = $one; break; }
     }
-    if (!$item) return null;
+    if (!$item || !graphBinaryBranches($graph, $elementId)) return null;
     $node = $graph['nodes'][$elementId];
     $pick = marksChoose($node, $graph, $ctx['free'], isset(advanceLive($ctx['steps'])[$elementId]));
     if ($pick === null) return null;
@@ -777,7 +788,7 @@ function advanceJevBranchPlanCurrent(int $runId, int $elementId): ?array
     $identity = [
         'scope' => 'branch', 'run' => $runId, 'element' => $elementId, 'mode' => 'judge',
         'marks' => array_map(static fn(array $m): array => [
-            'id' => (int) $m['id'], 'edge' => (int) $m['edge_id'],
+            'id' => (int) $m['id'], 'edge' => historyArrow($m),
             'fromStep' => (int) $m['from_step_id'], 'pass' => (int) $m['pass'],
         ], $pick['marks']),
     ];

@@ -25,10 +25,10 @@ function aiPlay(): void
         ['role' => 'system', 'content' => aiRules('simulation') . "\n\n"
             . ta('agents.ai.play_format')],
         ['role' => 'user', 'content' => ta('agents.ai.play_user', ['problems' => $problems ? implode('; ', $problems) : ta('agents.ai.no_problems'),
-                'scheme' => json_encode(aiContext($project, $folderId), JSON_UNESCAPED_UNICODE)])],
+                'scheme' => json_encode(aiAssistantContext($project, $folderId), JSON_UNESCAPED_UNICODE)])],
     ];
 
-    $answer = aiAsk($messages);
+    $answer = aiAsk($messages, ['kind' => 'play', 'target' => ['projectId' => (int) $project['id'], 'folderId' => $folderId]]);
     $play = $answer['data'];
     if (!$play) throw new ApiError(t('agents.ai.no_play'), 'server');
     // Сервер нашёл помеху — прогон встанет, что бы ни придумала модель.

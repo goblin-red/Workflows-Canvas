@@ -5,7 +5,7 @@
    кладёт разовый public/_mv-<токен>.php — его исполняет PHP сайта, у которого права есть. Потом всё
    временное удаляется. Инструкция — md_backend/ru/хостинг.md.
 
-   php bin/hosting-push.php [--site https://canvas.goblin.red] путь/от/корня …
+   php bin/hosting-push.php [--site https://your-site.example] путь/от/корня …
    Пути — от корня Гоблина: lib/projects/projects.php public/src/api/sync.js … */
 
 declare(strict_types=1);
@@ -15,9 +15,9 @@ require dirname(__DIR__) . '/lib/core/config.php';
 
 $root = dirname(__DIR__);
 $args = array_slice($argv, 1);
-$site = 'https://canvas.goblin.red';
+$site = '';
 if (($args[0] ?? '') === '--site') { $site = rtrim((string) $args[1], '/'); $args = array_slice($args, 2); }
-if (!$args) { echo "нужны пути файлов от корня Гоблина\n"; exit(1); }
+if ($site === '' || !$args) { echo "Usage: php bin/hosting-push.php --site https://your-site.example PATH ...\n"; exit(1); }
 
 $c = config();
 $ftp = sprintf('%s://%s:%d/%s', $c['ftp_protocol'] ?: 'ftp', $c['ftp_host'], (int) $c['ftp_port'], trim((string) $c['ftp_root'], '/'));
@@ -47,7 +47,7 @@ function ftp(string $url, ?string $body = null, array $commands = []): bool
 $map = [];
 foreach ($args as $i => $path) {
     $path = ltrim($path, './');
-    if (!is_file($root . '/' . $path)) { echo "нет файла: $path\n"; exit(1); }
+    if (!is_file($root . '/' . $path)) { echo "File not found: $path\n"; exit(1); }
     if (!ftp($ftp . "_up/f$i.bin", (string) file_get_contents($root . '/' . $path))) exit(1);
     $map["f$i.bin"] = $path;
 }
@@ -73,4 +73,4 @@ echo (string) file_get_contents("$site/_mv-$token.php?t=$token");
 // Уборка временного.
 $clean = array_map(static fn(string $name) => "DELE _up/$name", array_keys($map));
 ftp($ftp, null, [...$clean, 'DELE _up/map.json', 'RMD _up', "DELE public/_mv-$token.php"]);
-echo "временное убрано\n";
+echo "Temporary upload files removed\n";

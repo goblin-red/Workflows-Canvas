@@ -61,8 +61,9 @@ function installRun(array $in): array
     $driver = $val('driver') === 'mysql' ? 'mysql' : 'sqlite';
     $login = $val('admin_login', 'admin');
     $pass = (string) ($in['admin_pass'] ?? '');
-    if (mb_strlen($pass) < 8) throw new RuntimeException(t('install.err.pass'));
-    $lang = $val('lang') === 'en' ? 'en' : 'ru';
+    if ($login === 'admin' && $pass === '') $pass = 'admin';
+    if (!($login === 'admin' && $pass === 'admin') && mb_strlen($pass) < 8) throw new RuntimeException(t('install.err.pass'));
+    $lang = 'en';
 
     // База: SQLite — файл в data/; MySQL — пробное соединение, при желании — завести базу.
     $open = ['driver' => $driver, 'admin_login' => $login, 'lang_default' => $lang, 'php_cli' => installPhpCli()];
@@ -129,16 +130,13 @@ function installMysql(array $c, string $pass, bool $create): void
     }
 }
 
-/** Документация разработчика — её издатель (md_backend/документация/publish.php), ru и en. false — не вышло. */
+/** Документация разработчика — её издатель (md_backend/docs/publish.php), ru и en. false — не вышло. */
 function installDocs(): bool
 {
     $cli = (string) (config()['php_cli'] ?? '');
-    $script = dirname(__DIR__, 2) . '/md_backend/документация/publish.php';
+    $script = dirname(__DIR__, 2) . '/md_backend/docs/publish.php';
     if ($cli === '' || !is_file($script) || !function_exists('exec')) return false;
-    foreach (['ru', 'en'] as $lang) {
-        $code = 1;
-        @exec(escapeshellarg($cli) . ' ' . escapeshellarg($script) . ' --lang=' . $lang . ' 2>&1', $lines, $code);
-        if ($code !== 0) return false;
-    }
-    return true;
+    $code = 1;
+    @exec(escapeshellarg($cli) . ' ' . escapeshellarg($script) . ' 2>&1', $lines, $code);
+    return $code === 0;
 }

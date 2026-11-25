@@ -19,11 +19,12 @@ body[data-look="classic"] .node-title{
   display:flex;align-items:center;min-height:52px;padding:12px 14px;
   background:color-mix(in srgb,var(--card-edge,var(--line)) 20%,var(--surface));
   border-bottom:1px solid color-mix(in srgb,var(--card-edge,var(--line)) 45%,transparent)}
-body[data-look="classic"] .node-desc{flex:0 0 auto;padding:8px 14px;font-size:13px;color:var(--ink);max-height:38%}
+body[data-look="classic"] .node-desc{flex:0 0 auto;padding:8px 14px;color:var(--ink);max-height:38%}
 body[data-look="classic"] .node-image-section{width:100%;margin:0;height:auto;flex:1 1 auto;min-height:60px;max-height:none;object-fit:cover}
-/* В «Классике» картинка тоже фон карточки: полосы названия и описания лежат
-   поверх неё, а описание — по нижнему краю. */
-body[data-look="classic"] .node.has-image .node-image-section{position:absolute;inset:0;height:100%}
+/* У обложки остаётся поле внутри карточки. */
+body:is([data-look="classic"],[data-look="design"]) .node.has-image .node-image-section{
+  inset:var(--gap-sm);width:calc(100% - 2 * var(--gap-sm));height:calc(100% - 2 * var(--gap-sm));
+  min-height:0;border-radius:var(--r-sm)}
 body[data-look="classic"] .node.has-image .node-desc{margin-top:auto}
 body[data-look="classic"] .node-badges,
 body[data-look="classic"] .node-data{padding:0 14px 8px}
@@ -35,8 +36,6 @@ body[data-look="classic"] .arrow-label{font-family:var(--mono);letter-spacing:.0
   font-size:var(--label-size,11px)}
 body[data-look="classic"] .node.has-image .node-title{background:rgb(38,41,48);color:#fff}
 body[data-look="classic"] .node.has-image .node-desc{background:rgba(38,41,48,.7);color:#fff}
-/* У ромба и области плашки заголовка нет ни в одном виде — даже с картинкой. */
-body[data-look="classic"] .node.decision .node-title{background:none;border-bottom:none;padding:6px 0 0}
 /* Подпись области. */
 body[data-look="classic"] .node.area .node-title{background:none;border-bottom:none;
   padding:0 18px;font:400 34px/1.1 var(--sans)}
@@ -70,7 +69,7 @@ body[data-look="design"] .node-seq-badge{background:rgba(0,0,0,.5);border-color:
 body[data-look="dev"] .node-card{border-radius:4px;border-width:1px;box-shadow:none}
 body[data-look="dev"] .node-inner{padding:7px 9px;gap:3px}
 body[data-look="dev"] .node-title{font:600 13px/1.25 var(--mono)}
-body[data-look="dev"] .node-desc{font:12px/1.4 var(--mono)}
+body[data-look="dev"] .node-desc{font:var(--f-md)/1.4 var(--mono)}
 body[data-look="dev"] .node-badges span{font-size:10px;padding:0 5px}
 body[data-look="dev"] .node-seq-badge,body[data-look="dev"] .node-md-badge{height:18px;min-width:24px;font-size:9px}
 body[data-look="dev"] .arrow-label{font-family:var(--mono);
@@ -115,12 +114,10 @@ body:is([data-look="minimal"],[data-look="mobile"]) .node.block:not(.starter)[da
   border:3px solid var(--run)}
 body:is([data-look="minimal"],[data-look="mobile"]) .node.block:not(.starter)[data-step="cancelled"]:not([data-step="none"]) .node-card{border-style:dashed}
 /* Название — всё, что есть на карточке: крупно и по центру. */
-body:is([data-look="minimal"],[data-look="mobile"]) .node:is(.block,.gateway,.note):not(.starter) .node-inner{justify-content:center;align-items:center;text-align:center}
+body:is([data-look="minimal"],[data-look="mobile"]) .node:is(.block,.decision,.gateway,.note):not(.starter) .node-inner{justify-content:center;align-items:center;text-align:center}
 body:is([data-look="minimal"],[data-look="mobile"]) .node:is(.block,.decision,.gateway,.note) .node-title{font-size:19px;line-height:1.25}
-/* У ромба описания нет — название в самом центре фигуры, а не у верхнего среза;
-   поля по бокам шире, чтобы длинное название не наезжало на ярлыки «ДА» и «НЕТ». */
-body:is([data-look="minimal"],[data-look="mobile"]) .node.decision .node-title{top:50%;transform:translateY(-50%);
-  left:52px;right:52px;width:auto;padding-left:0;padding-right:0;max-height:70%;overflow:hidden}
+/* В мобильном и минимальном видах название ромба остаётся по центру. */
+body:is([data-look="minimal"],[data-look="mobile"]) .node.decision .node-title{max-height:70%;overflow:hidden}
 
 /* Место под кнопку сворачивания на плашке группы во всех оформлениях. */
 body[data-look] .node.group .node-title{padding-right:44px;min-height:30px}

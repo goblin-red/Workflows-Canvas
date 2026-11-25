@@ -60,9 +60,10 @@ const STRUCTURE_MAIN_PROPS = ['block' => ['answer'], 'decision' => ['cond']];
 
 function structureView(array $user, string $notice = ''): void
 {
-    $projects = userProjects((int) $user['id']);
+    $projects = accountGraphProjects(userProjects((int) $user['id']));
     $key = (string) ($_GET['project'] ?? ($projects[0]['url_key'] ?? ''));
     $project = $key ? dbRow('SELECT * FROM projects WHERE url_key = ?', [$key]) : null;
+    if ($project) $project = accountGraphProjects([$project])[0];
     $folderId = (int) ($_GET['folder'] ?? 0);
     $elementId = (int) ($_GET['element'] ?? 0);
 
@@ -92,8 +93,8 @@ function structureTree(array $projects, ?array $current, int $folderId, int $ele
         $open = $current && $project['id'] === $current['id'];
         echo '<li>';
         echo '<a class="tree-line project', $open && !$folderId && !$elementId ? ' on' : '', '" href="?section=structure&project=', h($project['url_key']), '">',
-             '<span class="tree-ico">🗂</span>', h($project['title'] ?: $project['url_key']),
-             '<small>', (int) $project['folders'], '</small></a>';
+             '<span class="tree-ico">🗂</span>', h(($project['display_title'] ?? $project['title']) ?: $project['url_key']),
+             '<small>', (int) $project['folders'] + (int) ($project['graph_folders'] ?? 0), '</small></a>';
 
         if ($open) {
             structureFolderBranch((int) $project['id'], $project['url_key'], null, $folderId, $elementId, 1);
@@ -178,11 +179,13 @@ function structureProjectCard(array $project): void
            FROM projects p WHERE p.id = ?', [$project['id']]
     );
 
-    echo '<h1>', t('account.structure.project_h1', ['name' => h($project['title'] ?: $project['url_key'])]), '</h1>';
+    echo '<h1>', t('account.structure.project_h1', ['name' => h(($project['display_title'] ?? $project['title']) ?: $project['url_key'])]), '</h1>';
     echo '<p class="muted mono">', t('account.structure.project_meta', ['key' => h($project['url_key']), 'id' => (int) $project['id'], 'rev' => (int) $project['rev']]), '</p>';
     echo '<div class="cards">';
-    foreach ([t('account.w.folders') => $counts['folders'], t('account.w.elements') => $counts['elements'],
-              t('account.structure.assets') => $counts['assets'], t('account.structure.runs') => $counts['runs']] as $title => $value) {
+    foreach ([t('account.w.folders') => $counts['folders'] + ($project['graph_folders'] ?? 0),
+              t('account.w.elements') => $counts['elements'] + ($project['graph_elements'] ?? 0),
+              t('account.structure.assets') => $counts['assets'] + ($project['graph_assets'] ?? 0),
+              t('account.structure.runs') => $counts['runs']] as $title => $value) {
         echo '<div class="card"><b>', (int) $value, '</b><span>', h($title), '</span></div>';
     }
     echo '</div>';
@@ -194,7 +197,8 @@ function structureProjectCard(array $project): void
          structureCheck('aiConfirm', t('account.structure.ai_confirm'), (int) $project['ai_confirm'] === 1),
          structureCheck('strictChecks', t('account.structure.strict'), (int) $project['strict_checks'] === 1),
          '<div class="row util-buttons"><button class="btn btn-accent">', h(t('common.save')), '</button>',
-         '<a class="btn btn-quiet" href="index.php#p=', h($project['url_key']), '">', h(t('account.structure.open_in_editor')), '</a></div></form>';
+         '<a class="btn btn-quiet" href="', h(webEditorUrl($project['url_key'], isset($project['root_id']) ? (int) $project['root_id'] : null)),
+         '">', h(t('account.structure.open_in_editor')), '</a></div></form>';
 }
 
 function structureFolderCard(array $project, int $folderId, array $projects): void
@@ -238,7 +242,8 @@ function structureFolderCard(array $project, int $folderId, array $projects): vo
     echo '</select><small class="muted">', h(t('account.structure.cards_hint')), '</small></label>',
          structureCheck('shareScheme', t('account.structure.share_scheme'), (int) $folder['share_scheme'] === 1),
          '<div class="row util-buttons"><button class="btn btn-accent">', h(t('common.save')), '</button>',
-         '<a class="btn btn-quiet" href="index.php#p=', h($project['url_key']), '&f=', $folderId, '">', h(t('account.structure.open_in_editor')), '</a></div></form>';
+         '<a class="btn btn-quiet" href="', h(webEditorUrl($project['url_key'], webGraphFolderId((int) $project['id'], $folderId), $folderId)),
+         '">', h(t('account.structure.open_in_editor')), '</a></div></form>';
 
     echo '<h2>', h(t('account.structure.move_title')), '</h2>';
     $others = array_filter($projects, static fn(array $other) => $other['url_key'] !== $project['url_key']);
@@ -277,7 +282,7 @@ function structureElementCard(array $project, int $elementId): void
     echo '<h1><span class="util-kind">', $starter ? t('account.structure.starter') : h(implode(' ', structureKinds()[$type] ?? ['·', $type])), '</span> ',
          '⟨', (int) $element['no'], '⟩ ', h((string) $element['title']), '</h1>';
     $folderLink = '<a href="?section=structure&project=' . h($key) . '&folder=' . $folderId . '">' . h((string) ($folder['name'] ?? $folderId)) . '</a>';
-    $editorLink = '<a href="index.php#p=' . h($key) . '&f=' . $folderId . '&e=' . (int) $element['no'] . '">' . h(t('account.structure.open_lc')) . '</a>';
+    $editorLink = '<a href="' . h(webEditorUrl($key, folder: $folderId, element: (int) $element['no'])) . '">' . h(t('account.structure.open_lc')) . '</a>';
     echo '<p class="muted mono">', t('account.structure.element_meta', ['id' => $elementId, 'folder' => $folderLink,
          'rev' => (int) $element['rev'], 'open' => $editorLink]), '</p>';
 
@@ -385,14 +390,15 @@ function structureElementCard(array $project, int $elementId): void
 
     // История шагов прогона.
     $steps = dbAll(
-        'SELECT s.*, r.`no` AS run_no FROM run_steps s JOIN runs r ON r.id = s.run_id
+        'SELECT s.*, r.`no` AS run_no, r.folder_id FROM run_steps s JOIN runs r ON r.id = s.run_id
           WHERE s.element_id = ? ORDER BY s.id DESC LIMIT 20', [$elementId]
     );
     echo '<h2>', h(t('account.structure.steps')), '</h2>';
     if ($steps) {
         echo '<table class="acc-table"><thead><tr><th>', h(t('account.structure.run')), '</th><th>', h(t('account.structure.address')), '</th><th>', h(t('account.w.state')), '</th><th>', h(t('account.structure.result')), '</th><th>', h(t('account.ai.when')), '</th></tr></thead><tbody>';
         foreach ($steps as $step) {
-            echo '<tr><td>r', (int) $step['run_no'], '</td><td class="mono">', (int) $element['no'], '.', (int) $step['attempt'], '</td>',
+            echo '<tr><td><a href="', h(webEditorUrl($key, folder: (int) $step['folder_id'], run: (int) $step['run_id'])),
+                 '">r', (int) $step['run_no'], '</a></td><td class="mono">', (int) $element['no'], '.', (int) $step['attempt'], '</td>',
                  '<td>', h(structureStates()[$step['state']] ?? $step['state']), '</td><td>', h(mb_strimwidth((string) $step['result'], 0, 120, '…')), '</td>',
                  '<td class="muted">', h(substr((string) $step['opened_at'], 0, 19)), '</td></tr>';
         }

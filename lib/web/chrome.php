@@ -16,8 +16,12 @@ function pageTop(string $title, string $active = ''): void
          '<meta name="viewport" content="width=device-width, initial-scale=1"><title>', h($title), t('account.page.title_suffix'), '</title>',
          '<link rel="stylesheet" href="css/tokens.css?v=', $version, '">',
          '<link rel="stylesheet" href="css/base.css?v=', $version, '">',
-         '<link rel="stylesheet" href="css/account.css?v=', $version, '"></head>',
-         '<body class="account" data-section="', h($active), '">',
+         '<link rel="stylesheet" href="css/account.css?v=', $version, '">';
+    if ($active === 'ai') {
+        echo '<link rel="stylesheet" href="css/ai-agent.css?v=', $version, '">', langScript(['editor']),
+            '<script type="importmap">', importMap(dirname(__DIR__, 2), $version), '</script>';
+    }
+    echo '</head><body class="account" data-section="', h($active), '">',
          '<header class="acc-top"><a class="brand" href="index.php">', t('account.page.brand'), '</a><nav>';
     foreach ($tabs as $key => $label) {
         echo '<a href="account.php?section=', $key, '"', $active === $key ? ' class="on"' : '', '>', h($label), '</a>';

@@ -64,7 +64,7 @@ function inOrder(list) {
     if (isFolder(a) !== isFolder(b)) return isFolder(a) ? -1 : 1;
     if (a.no && b.no) return a.no - b.no;
     if (a.no || b.no) return a.no ? -1 : 1;
-    return (a.title || '').localeCompare(b.title || '', 'ru');
+    return (a.title || '').localeCompare(b.title || '', 'en');
   });
 }
 

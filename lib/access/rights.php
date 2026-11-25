@@ -160,25 +160,25 @@ function sameProject(?array $row, int $projectId, string $what = 'object'): arra
     return $row;
 }
 
-/** «… не найден» целой фразой на сущность: род слова не склеиваем. $what — код ('folder') или прежнее русское слово ('Папка'). */
+/** «… не найден» целой фразой на сущность: род слова не склеиваем. $what — код ('folder') или прежнее русское слово ('Folder'). */
 function notFoundText(string $what): string
 {
     return match ($what) {
-        'agent', 'Агент' => t('server.not_found.agent'),
-        'element', 'Элемент' => t('server.not_found.element'),
-        'folder', 'Папка' => t('server.not_found.folder'),
-        'link', 'Привязка' => t('server.not_found.link'),
-        'run', 'Прогон' => t('server.not_found.run'),
-        'step', 'Шаг' => t('server.not_found.step'),
-        'asset', 'Материал' => t('server.not_found.asset'),
-        'container', 'Контейнер' => t('server.not_found.container'),
-        'arrow_start', 'Начало стрелки' => t('server.not_found.arrow_start'),
-        'arrow_end', 'Конец стрелки' => t('server.not_found.arrow_end'),
-        'end', 'Конец' => t('server.not_found.end'),
-        'link_owner', 'Владелец ярлыка' => t('server.not_found.link_owner'),
-        'link_target', 'Цель ярлыка' => t('server.not_found.link_target'),
-        'target_folder', 'Папка-цель' => t('server.not_found.target_folder'),
-        'object', 'Объект' => t('server.not_found.object'),
+        'agent', 'Agent' => t('server.not_found.agent'),
+        'element', 'Element' => t('server.not_found.element'),
+        'folder', 'Folder' => t('server.not_found.folder'),
+        'link', 'Attachment' => t('server.not_found.link'),
+        'run', 'Run' => t('server.not_found.run'),
+        'step', 'Step' => t('server.not_found.step'),
+        'asset', 'Material' => t('server.not_found.asset'),
+        'container', 'Container' => t('server.not_found.container'),
+        'arrow_start', 'Arrow source' => t('server.not_found.arrow_start'),
+        'arrow_end', 'Arrow target' => t('server.not_found.arrow_end'),
+        'end', 'End' => t('server.not_found.end'),
+        'link_owner', 'Shortcut owner' => t('server.not_found.link_owner'),
+        'link_target', 'Shortcut target' => t('server.not_found.link_target'),
+        'target_folder', 'Target folder' => t('server.not_found.target_folder'),
+        'object', 'Object' => t('server.not_found.object'),
         default => t('server.not_found.other', ['what' => $what]),
     };
 }
@@ -187,23 +187,23 @@ function notFoundText(string $what): string
 function entityLabel(string $what): string
 {
     return match ($what) {
-        'agent', 'Агент' => t('server.label.agent'),
-        'role', 'Роль' => t('server.label.role'),
+        'agent', 'Agent' => t('server.label.agent'),
+        'role', 'Role' => t('server.label.role'),
         'cli', 'CLI' => t('server.label.cli'),
-        'effort', 'Эффорт' => t('server.label.effort'),
-        'permission', 'Разрешения' => t('server.label.permission'),
-        'sandbox', 'Песочница' => t('server.label.sandbox'),
-        'container', 'Контейнер' => t('server.label.container'),
-        'arrow_start', 'Начало стрелки' => t('server.label.arrow_start'),
-        'arrow_end', 'Конец стрелки' => t('server.label.arrow_end'),
-        'end', 'Конец' => t('server.label.end'),
-        'link_owner', 'Владелец ярлыка' => t('server.label.link_owner'),
-        'link_target', 'Цель ярлыка' => t('server.label.link_target'),
-        'element', 'Элемент' => t('server.label.element'),
-        'folder', 'Папка' => t('server.label.folder'),
-        'work_dir', 'Рабочая папка' => t('server.label.work_dir'),
-        'asset_file', 'Файл материала' => t('server.label.asset_file'),
-        'asset_path', 'Путь материала' => t('server.label.asset_path'),
+        'effort', 'Effort' => t('server.label.effort'),
+        'permission', 'Permissions' => t('server.label.permission'),
+        'sandbox', 'Sandbox' => t('server.label.sandbox'),
+        'container', 'Container' => t('server.label.container'),
+        'arrow_start', 'Arrow source' => t('server.label.arrow_start'),
+        'arrow_end', 'Arrow target' => t('server.label.arrow_end'),
+        'end', 'End' => t('server.label.end'),
+        'link_owner', 'Shortcut owner' => t('server.label.link_owner'),
+        'link_target', 'Shortcut target' => t('server.label.link_target'),
+        'element', 'Element' => t('server.label.element'),
+        'folder', 'Folder' => t('server.label.folder'),
+        'work_dir', 'Working folder' => t('server.label.work_dir'),
+        'asset_file', 'Material file' => t('server.label.asset_file'),
+        'asset_path', 'Material path' => t('server.label.asset_path'),
         default => $what,
     };
 }

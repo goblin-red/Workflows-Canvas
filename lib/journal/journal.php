@@ -59,30 +59,30 @@ function journalWarn(int $journalId, array $warnings): void
 function journalJson(?array $data): ?string
 {
     if ($data === null) return null;
-    $data = journalCleanSecrets($data);
-    array_walk_recursive($data, static function (&$v) {
-        if (is_string($v) && strlen($v) > JOURNAL_VALUE_LIMIT) {
-            $v = [t('server.journal.long_text') => t('server.journal.bytes', ['n' => strlen($v)])];
-        }
-    });
-    return json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    return json_encode(journalCleanSecrets($data, true), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 }
 
 /** Удалить секретные поля на любой глубине: step.token не должен пережить ответ. */
-function journalCleanSecrets(array $data): array
+function journalCleanSecrets(array $data, bool $limitValues = false): array
 {
     foreach ($data as $key => $value) {
         if (is_string($key) && in_array(strtolower($key), ['token', 'howto'], true)) {
             unset($data[$key]);
             continue;
         }
-        if (is_array($value)) $data[$key] = journalCleanSecrets($value);
-        elseif (is_string($value)) {
-            $data[$key] = (string) preg_replace(
+        if (is_array($value)) {
+            $data[$key] = journalCleanSecrets($value, $limitValues);
+        } elseif ($value instanceof stdClass) {
+            $data[$key] = (object) journalCleanSecrets((array) $value, $limitValues);
+        } elseif (is_string($value)) {
+            $clean = (string) preg_replace(
                 ['/\b(gbs|gbr|gba|gbl)_[A-Za-z0-9]+/', '/\bapikey_[A-Za-z0-9_]+/', '/\bsk-[A-Za-z0-9\-]{10,}/'],
                 ['$1_…', 'apikey_…', 'sk-…'],
                 $value
             );
+            $data[$key] = $limitValues && strlen($clean) > JOURNAL_VALUE_LIMIT
+                ? [t('server.journal.long_text') => t('server.journal.bytes', ['n' => strlen($clean)])]
+                : $clean;
         }
     }
     return $data;
@@ -94,6 +94,7 @@ function journalHasSecrets(array $data): bool
     foreach ($data as $key => $value) {
         if (is_string($key) && in_array(strtolower($key), ['token', 'howto'], true)) return true;
         if (is_array($value) && journalHasSecrets($value)) return true;
+        if ($value instanceof stdClass && journalHasSecrets((array) $value)) return true;
     }
     return false;
 }

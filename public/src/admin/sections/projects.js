@@ -27,7 +27,7 @@ export async function render(root, route) {
       { key: 'visitors', title: t('admin.projects.guests_n'), type: 'num' },
       { key: 'lastEdit', title: t('admin.w.last_edit'), type: 'date', render: (p) => el('span', 'nowrap', fmt.ago(p.lastEdit || p.updated)) },
       { key: 'created', title: t('admin.w.created'), type: 'date' },
-      { key: 'open', title: '', sort: false, render: (p) => outLink('↗', editorUrl(p.key)) },
+      { key: 'open', title: '', sort: false, render: (p) => outLink('↗', p.editorUrl || editorUrl(p.key)) },
     ],
     filters: [
       { label: t('admin.w.all'), test: () => true },
@@ -49,7 +49,7 @@ async function openProject(id, route) {
 
   // Название и владелец.
   const title = el('input', 'input');
-  title.value = p.title;
+  title.value = p.storedTitle ?? p.title;
   const owner = el('select', 'input');
   owner.append(new Option(t('admin.projects.no_owner'), ''));
   for (const u of d.users) owner.append(new Option(u.email, u.id));
@@ -85,7 +85,7 @@ async function openProject(id, route) {
   };
 
   const body = el('div', '', [
-    el('div', 'adm-drawer-actions', [outLink(t('admin.w.open_editor'), editorUrl(p.key)), drop]),
+    el('div', 'adm-drawer-actions', [outLink(t('admin.w.open_editor'), p.editorUrl || editorUrl(p.key)), drop]),
     kv({
       [t('admin.w.key')]: el('span', 'adm-mono', p.key), [t('admin.w.created')]: fmt.date(p.created), [t('admin.w.last_edit')]: fmt.date(p.lastEdit || p.updated),
       [t('admin.w.schemes_n')]: fmt.num(p.folders), [t('admin.w.elements')]: fmt.num(p.elements), [t('admin.w.runs_n')]: fmt.num(p.runs),
@@ -100,13 +100,17 @@ async function openProject(id, route) {
       name: 'project-schemes', compact: true, rows: d.schemes, sort: { key: 'updated', dir: 'desc' },
       columns: [
         { key: 'name', title: t('admin.w.scheme') },
+        { key: 'author', title: t('admin.schemes.author'), render: (s) => s.author || t('admin.schemes.author_unknown') },
         { key: 'blocks', title: t('admin.w.blocks'), type: 'num' },
         { key: 'decisions', title: t('admin.w.decisions'), type: 'num' },
         { key: 'starter', title: t('admin.w.starter'), render: (s) => (s.starter ? badge('accepted', t('admin.w.has')) : el('span', 'adm-faint', t('admin.w.none'))) },
         { key: 'runs', title: t('admin.w.runs_n'), type: 'num' },
         { key: 'updated', title: t('admin.w.edited'), type: 'date', render: (s) => el('span', 'nowrap', fmt.ago(s.updated)) },
       ],
-      onRow: (s) => { location.hash = 'schemes/' + s.id; },
+      onRow: (s) => {
+        if (s.type === 'native') window.location.assign(s.editorUrl);
+        else location.hash = 'schemes/' + s.id;
+      },
     }),
     sub(`${t('admin.w.runs')} · ${d.runs.length}`),
     dataTable({

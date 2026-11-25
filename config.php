@@ -61,7 +61,8 @@ return [
     'guest_ai'         => true,
     /* Язык интерфейса, пока человек не выбрал свой (cookie goblin_lang): ru или en. От него же — язык агентов
        нового проекта. На сайте canvas.goblin.red — en (config_web.php). */
-    'lang_default'     => 'ru',
+    'lang_default'     => 'en',
+    'graph_editor'      => true,
     /* Первый заход (в браузере ничего не выбрано): скин и вкладка левой плашки в скинах с вкладками.
        Сайт canvas.goblin.red — «Классика» с вкладкой «Настройки» (config_web.php). На телефоне — всегда мобильный. */
     'look_default'     => 'work',

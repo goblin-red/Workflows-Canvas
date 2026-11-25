@@ -32,7 +32,7 @@ function jevAcceptQuestions(array $accept, array $reject): array
         $questions["a{$i}"] = [
             'type'         => 'noul',
             'instructions' =>
-                "`accept[{$i}]` is a requirement written in Russian. "
+                "`accept[{$i}]` is a requirement written by the user. "
                 . '`task` is the assignment and `work` is the submitted work. '
                 . "Is the statement in `accept[{$i}]` true of `work`?",
         ];
@@ -42,7 +42,7 @@ function jevAcceptQuestions(array $accept, array $reject): array
         $questions["r{$i}"] = [
             'type'         => 'noul',
             'instructions' =>
-                "`reject[{$i}]` describes, in Russian, something the work must not contain. "
+                "`reject[{$i}]` describes something the work must not contain. "
                 . "Does `work` contain what `reject[{$i}]` describes?",
         ];
     }
@@ -60,7 +60,7 @@ function jevBranchQuestion(): array
         'branch' => [
             'type'         => 'choice',
             'instructions' =>
-                '`condition` is a rule written in Russian on a decision point of a workflow. '
+                '`condition` is a rule written by the user on a decision point of a workflow. '
                 . '`data` holds the results available at this point. '
                 . 'Does `condition` hold for `data`?',
             'criteria'     => [

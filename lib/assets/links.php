@@ -10,14 +10,14 @@
 declare(strict_types=1);
 
 const LINK_ROLES = [
-    'spec'       => 'ТЗ — что нужно сделать',
-    'code'       => 'код рядом с блоком',
-    'input'      => 'вход, исходник',
-    'reference'  => 'образец или справка',
-    'cover'      => 'обложка карточки',
-    'attachment' => 'всё прочее',
-    'result'     => 'результат работы',
-    'preview'    => 'превью результата',
+    'spec'       => 'Task specification',
+    'code'       => 'Code for the block',
+    'input'      => 'Input or source',
+    'reference'  => 'Example or reference',
+    'cover'      => 'Card cover',
+    'attachment' => 'Other attachment',
+    'result'     => 'Work result',
+    'preview'    => 'Result preview',
 ];
 
 /** Операция asset.link. Повторная привязка того же в то же место ничего не ломает. */

@@ -8,7 +8,8 @@
    потом папки, потом всё остальное. */
 
 import { state, on } from 'goblin/core/state.js';
-import { setLook } from 'goblin/canvas/looks.js';
+import { SKINS, currentLook, setLook } from 'goblin/canvas/looks.js';
+import { selectClassicSkin } from 'goblin/shell/skin.js';
 import { initMobileTools } from 'goblin/mobile/tools.js';
 import { t } from 'goblin/core/i18n.js';
 
@@ -68,6 +69,18 @@ export function initDrawer() {
   foot.className = 'm-rail-foot';
   foot.innerHTML = `<a class="btn" href="account.php"></a><button class="btn">${t('editor.mobile.desktop')}</button>`;
   foot.querySelector('button').onclick = () => { closeDrawer(); setLook('work'); };
+  const skins = document.createElement('select');
+  skins.className = 'input m-skin-pick';
+  skins.setAttribute('aria-label', t('editor.topbar.look_pick'));
+  for (const [id, item] of Object.entries(SKINS)) skins.add(new Option(item.title, id));
+  const syncSkin = () => { skins.value = currentLook(); };
+  skins.onchange = async () => {
+    await selectClassicSkin(skins.value);
+    syncSkin();
+  };
+  syncSkin();
+  on('look', syncSkin);
+  foot.prepend(skins);
   // Шапки на телефоне нет — вход здесь: «Мой кабинет» или «Войти».
   const account = foot.querySelector('a');
   const label = () => { account.textContent = t(state.me ? 'editor.account.mine' : 'editor.account.login'); };

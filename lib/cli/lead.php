@@ -29,19 +29,19 @@ function cmdCheck(array $f): int
     $answer = call('GET', 'run.check', ['folder' => $f['folder'] ?? null], $f);
 
     if (!empty($answer['ready'])) {
-        say("✓ схема готова: {$answer['steps']} шагов, вход — блок {$answer['entries'][0]['no']}");
+        say("✓ scheme ready: {$answer['steps']} steps. Entry block {$answer['entries'][0]['no']}");
         return 0;
     }
-    say('✗ схема не готова:');
+    say('✗ scheme is not ready:');
     foreach ($answer['problems'] ?? [] as $problem) {
-        $where = !empty($problem['no']) ? "блок {$problem['no']}: " : '';
+        $where = !empty($problem['no']) ? "block {$problem['no']}: " : '';
         say("  · $where{$problem['say']}");
     }
     return 1;
 }
 
 /**
- * Подготовить папку к новому прогону: снять статусы прошлых прогонов,
+ * Подготовить папку к новому прогону: снять previous run states,
  * убрать обложки, которые поставил прогон, и (с --files) вычистить `out/`
  * и `service/steps` в рабочей папке. Входы остаются на месте.
  */
@@ -53,20 +53,20 @@ function cmdPrepare(array $f): int
     ], $f);
 
     $was = $answer['prepared'] ?? [];
-    say('✓ папка готова к новому прогону');
+    say('✓ folder ready for a new run');
     // Ярлык rN, а не id строки; старые серверы ярлыка не присылают — тогда молчим.
     $upTo = (int) ($was['runsHiddenNo'] ?? 0);
-    say('  статусы прошлых прогонов' . ($upTo ? " по r$upTo" : '') . ' сняты с холста');
-    say('  обложек из прогона снято: ' . (int) ($was['coversDropped'] ?? 0)
-        . ', всего материалов прогона: ' . (int) ($was['linksDropped'] ?? 0));
+    say('  previous run states' . ($upTo ? " through r$upTo" : '') . ' cleared from the canvas');
+    say('  run covers removed: ' . (int) ($was['coversDropped'] ?? 0)
+        . ', total run materials: ' . (int) ($was['linksDropped'] ?? 0));
 
     // Раньше строка читалась как жалоба на недостачу, хотя это норма.
     if (!empty($was['filesCleaned'])) {
         foreach ($was['filesCleaned'] as $part => $count) {
-            say(is_int($count) ? "  $part: убрано файлов $count" : "  $part: $count");
+            say(is_int($count) ? "  $part: files removed $count" : "  $part: $count");
         }
     } else {
-        say('  файлы в рабочей папке оставлены как есть — чистит их только --files');
+        say('  Use --files to remove run output from the working folder.');
     }
     return 0;
 }
@@ -81,25 +81,25 @@ function cmdStart(array $f): int
         if (is_string($f[$key] ?? null)) $args[$key] = $f[$key];
     }
     if (isset($f['pause'])) {
-        if (!is_numeric($f['pause'])) die_('--pause <секунды>: число, 0 — без паузы показа');
+        if (!is_numeric($f['pause'])) die_('--pause expects seconds. Use 0 to disable the display pause.');
         $args['pause'] = (float) $f['pause'];
     }
     $args['commandId'] = commandId($f, 'run.start', $args);
 
     $answer = call('POST', 'run.start', $args, $f);
     $run = $answer['run'];
-    say("✓ прогон {$run['label']} начат, старт — блок {$answer['start']['no']}");
+    say("✓ run {$run['label']} started at block {$answer['start']['no']}");
     // Вариант печатаем, только если сервер его понял и вернул.
     if (isset($run['driver'])) {
-        say('вариант: ' . implode(' · ', array_filter([
+        say('mode: ' . implode(' · ', array_filter([
             DRIVER_WORDS[$run['driver']] ?? null,
             JUDGE_WORDS[$run['judge'] ?? ''] ?? null,
             JEV_WORDS[$run['jev'] ?? ''] ?? null,
-            ((float) ($run['showPause'] ?? 0)) > 0 ? 'пауза показа ' . secs($run['showPause']) . ' с' : null,
+            ((float) ($run['showPause'] ?? 0)) > 0 ? 'display pause ' . secs($run['showPause']) . ' s' : null,
         ])));
     }
     /* Ярлык нужен дальше каждой команде (--id rN) и worker, а внутри фразы
-       «прогон r85 начат» его не выкусишь: отдаём отдельной строкой. */
+       «Run r85 начат» его не выкусишь: отдаём отдельной строкой. */
     say("export GOBLIN_RUN={$answer['token']}");
     say("export GOBLIN_RUN_LABEL={$run['label']}");
     return 0;
@@ -111,7 +111,7 @@ function cmdStart(array $f): int
 function cmdNext(array $f): int
 {
     $answer = call('GET', 'run.get', runArgs($f), $f);
-    say("прогон r{$answer['run']['no']} · {$answer['run']['state']}");
+    say("Run r{$answer['run']['no']} · {$answer['run']['state']}");
     foreach ($answer['steps'] as $step) {
         $mark = MARKS[$step['state']] ?? '·';
         say("  $mark {$step['no']}.{$step['attempt']} {$step['title']} — {$step['state']}");
@@ -119,11 +119,11 @@ function cmdNext(array $f): int
 
     if (!empty($answer['ready'])) {
         $list = array_map(static fn($r) => "{$r['no']} ({$r['title']})", $answer['ready']);
-        say('можно открыть: ' . implode(', ', $list));
+        say('Ready to open: ' . implode(', ', $list));
     } else {
-        say('открыть нечего: ждём сдачи или прогон окончен');
+        say('No steps to open. The run is waiting for a result or has ended.');
     }
-    if (!empty($answer['stop'])) say('⚠ человек попросил остановиться');
+    if (!empty($answer['stop'])) say('⚠ A person requested a stop');
     return 0;
 }
 
@@ -139,7 +139,7 @@ function noteWithLead(?string $note): ?string
 function cmdOpen(array $f): int
 {
     $answer = openStep($f);
-    say("✓ шаг {$answer['step']['no']}.{$answer['step']['attempt']} выдан");
+    say("✓ step {$answer['step']['no']}.{$answer['step']['attempt']} issued");
     say("export GOBLIN_STEP={$answer['token']}");
     return 0;
 }
@@ -176,7 +176,7 @@ function cmdWait(array $f): int
         sleep(2);
         $waited += 2;
     }
-    die_('не дождались');
+    die_('timed out');
     return 1;
 }
 
@@ -192,13 +192,13 @@ function cmdWait(array $f): int
 function cmdSay(array $f): int
 {
     $text = (string) (arg($f) ?? $f['text'] ?? '');
-    if (trim($text) === '') die_('нечего говорить: goblin say «текст» [--to ОПУС-3]');
+    if (trim($text) === '') die_('Specify a message: goblin say "message" [--to AGENT]');
 
     $who = is_string($f['to'] ?? null) ? " → {$f['to']}" : '';
     tell($f, 'message', mb_substr(trim($who === '' ? $text : "$who: $text"), 0, 200), $text,
         ['no' => is_string($f['no'] ?? null) ? $f['no'] : null]);
 
-    say('✓ записано в ленту прогона');
+    say('✓ added to the run timeline');
     return 0;
 }
 
@@ -224,7 +224,7 @@ function cmdLog(array $f): int
         'limit' => $f['limit'] ?? null,
     ], static fn($v) => is_string($v)), $f);
 
-    say("прогон {$answer['run']['label']} · {$answer['run']['state']} · событий "
+    say("Run {$answer['run']['label']} · {$answer['run']['state']} · events "
         . count($answer['events']));
 
     foreach ($answer['events'] as $one) {
@@ -247,10 +247,10 @@ function logLine(array $e): string
        («пакет задания · 3,3 КБ»), и строка выходила с двумя размерами подряд
        в разных написаниях — свой не добавляем. */
     $body = '';
-    if ($e['size'] > 0 && !preg_match('/\d+([.,]\d+)?\s*(Б|КБ|МБ)\s*$/u', (string) $e['title'])) {
-        $body = ' · ' . ($e['size'] < 1024 ? $e['size'] . ' Б' : round($e['size'] / 1024, 1) . ' КБ');
+    if ($e['size'] > 0 && !preg_match('/\d+([.,]\d+)?\s*(B|KB|MB|Б|КБ|МБ)\s*$/u', (string) $e['title'])) {
+        $body = ' · ' . ($e['size'] < 1024 ? $e['size'] . ' B' : round($e['size'] / 1024, 1) . ' KB');
     }
-    $took = $e['tookMs'] ? ' · ' . round($e['tookMs'] / 1000, 1) . ' с' : '';
+    $took = $e['tookMs'] ? ' · ' . round($e['tookMs'] / 1000, 1) . ' s' : '';
     return sprintf('%4d %s %s %-7s %-9s %s%s%s', $e['id'], $when, $mark, $step, $e['kind'], $e['title'], $took, $body);
 }
 
@@ -268,10 +268,10 @@ function cmdJev(array $f): int
 
     $jev = $answer['jev'];
     if (isset($jev['branch'])) {
-        say(sprintf('◆ джев: ветка %s · уверенность %d%%',
+        say(sprintf('◆ Jev: branch %s · confidence %d%%',
             $jev['branch'], round(((float) $jev['confidence']) * 100)));
     } else {
-        sayJev($jev, (string) (arg($f) ?? 'шаг'));
+        sayJev($jev, (string) (arg($f) ?? 'step'));
     }
     if (!empty($f['raw'])) show($jev);
     return 0;
@@ -282,7 +282,7 @@ function sayJev(array $jev, string $where): void
 {
     $against = (float) ($jev['contradicts'] ?? 0);
     $mark = $against >= 0.8 ? '✗' : ($against >= 0.5 ? '⚠' : '✓');
-    say(sprintf('%s %s · противоречие %d%% · %s · принять %d%% (уверенность %d%%)',
+    say(sprintf('%s %s · contradiction %d%% · %s · acceptance %d%% (confidence %d%%)',
         $mark, $where, round($against * 100), $jev['why'] ?? '?',
         round(((float) ($jev['accept'] ?? 0)) * 100),
         round(((float) ($jev['confidence'] ?? 0)) * 100)));
@@ -298,14 +298,14 @@ function cmdAccept(array $f): int
     ], $f);
 
     foreach ($answer['warnings'] ?? [] as $warning) say("⚠ $warning");
-    say("✓ принят шаг {$answer['step']['no']}.{$answer['step']['attempt']}");
+    say("✓ accepted step {$answer['step']['no']}.{$answer['step']['attempt']}");
     return 0;
 }
 
 function cmdReturn(array $f): int
 {
     $answer = call('POST', 'step.return', runArgs($f) + ['no' => arg($f), 'why' => $f['why'] ?? null], $f);
-    say("↩ возвращён шаг {$answer['step']['no']}.{$answer['step']['attempt']}");
+    say("↩ returned step {$answer['step']['no']}.{$answer['step']['attempt']}");
     return 0;
 }
 
@@ -314,21 +314,21 @@ function cmdDecide(array $f): int
     $branch = arg($f, 1);
     $answer = call('POST', 'step.decide',
         runArgs($f) + ['no' => arg($f), 'branch' => $branch, 'why' => $f['why'] ?? null], $f);
-    say("✓ ромб {$answer['step']['no']}: ветка $branch");
+    say("✓ decision {$answer['step']['no']}: branch $branch");
     return 0;
 }
 
 function cmdPass(array $f): int
 {
     $answer = call('POST', 'step.pass', runArgs($f) + ['no' => arg($f)], $f);
-    say("✓ шлюз {$answer['step']['no']}: прогон перешёл в папку {$answer['folder']}");
+    say("✓ gateway {$answer['step']['no']}: run continued in folder {$answer['folder']}");
     return 0;
 }
 
 function cmdCancel(array $f): int
 {
     call('POST', 'step.cancel', runArgs($f) + ['no' => arg($f), 'why' => $f['why'] ?? null], $f);
-    say('✓ шаг отменён');
+    say('✓ step cancelled');
     return 0;
 }
 
@@ -345,14 +345,14 @@ function cmdReissue(array $f): int
 function cmdPause(array $f): int
 {
     call('POST', 'run.pause', runArgs($f), $f);
-    say('⏸ пауза');
+    say('⏸ paused');
     return 0;
 }
 
 function cmdResume(array $f): int
 {
     call('POST', 'run.resume', runArgs($f), $f);
-    say('▶ продолжаем');
+    say('▶ resumed');
     return 0;
 }
 
@@ -360,19 +360,19 @@ function cmdStop(array $f): int
 {
     $answer = call('POST', 'run.stop', runArgs($f) + ['now' => !empty($f['now']) ? 1 : null], $f);
     $already = alreadyLine($answer);
-    say($already !== null ? "· $already" : '■ остановка запрошена');
+    say($already !== null ? "· $already" : '■ stop requested');
     return 0;
 }
 
 /**
  * Команда пришла к уже закрытому прогону (`already`): сервер ничего не менял — так и
- * говорим, без «✓» свежего успеха. Не закрыт раньше — null.
+ * говорим, без «✓» свежего успеха. Не already closed — null.
  */
 function alreadyLine(array $answer): ?string
 {
     if (!isset($answer['already'])) return null;
     $word = RUN_WORDS[$answer['already']] ?? $answer['already'];
-    return 'прогон ' . ($answer['run']['label'] ?? '?') . " закрыт раньше — $word; ничего не изменилось";
+    return 'run ' . ($answer['run']['label'] ?? '?') . " already closed — $word. No changes made.";
 }
 
 function cmdAttach(array $f): int
@@ -380,7 +380,7 @@ function cmdAttach(array $f): int
     $answer = call('POST', 'run.attach', ['run' => arg($f)], $f);
     say("export GOBLIN_RUN={$answer['token']}");
     foreach ($answer['open'] ?? [] as $step) {
-        say("  открыт шаг {$step['no']}.{$step['attempt']} — {$step['state']}");
+        say("  opened step {$step['no']}.{$step['attempt']} — {$step['state']}");
     }
     return 0;
 }
@@ -393,7 +393,7 @@ function cmdFinish(array $f): int
         'summary' => $f['summary'] ?? null,
     ], $f);
     $already = alreadyLine($answer);
-    say($already !== null ? "· $already" : "✓ прогон {$answer['run']['label']} закрыт: {$answer['run']['state']}");
+    say($already !== null ? "· $already" : "✓ run {$answer['run']['label']} closed: {$answer['run']['state']}");
     return 0;
 }
 
@@ -402,11 +402,11 @@ function cmdReset(array $f): int
 {
     if (!empty($f['all'])) {
         $answer = call('POST', 'run.reset', runArgs($f), $f);
-        say("✓ прогон начат заново, стёрто шагов: {$answer['reset']}");
+        say("✓ restarted the run. Steps removed: {$answer['reset']}");
         return 0;
     }
     $answer = call('POST', 'step.reset', runArgs($f) + ['no' => arg($f)], $f);
-    say("✓ блок {$answer['no']} снова новый, стёрто попыток: {$answer['reset']}");
+    say("✓ block {$answer['no']} reset. Attempts removed: {$answer['reset']}");
     return 0;
 }
 
@@ -417,7 +417,7 @@ function cmdReset(array $f): int
 function cmdSteps(array $f): int
 {
     $answer = askAboutRun('run.get', runArgs($f), $f);
-    say("прогон r{$answer['run']['no']} · {$answer['run']['state']}");
+    say("Run r{$answer['run']['no']} · {$answer['run']['state']}");
 
     foreach ($answer['steps'] as $step) {
         $mark = MARKS[$step['state']] ?? '·';
@@ -433,7 +433,7 @@ function cmdSteps(array $f): int
         in_array($s['state'], ['issued', 'running'], true) && empty($s['selfServe']));
     if ($live) {
         $fix = array_map(static fn($s) => "goblin reissue {$s['no']}", $live);
-        say('нужен пропуск шага — выпиши новый: ' . implode(', ', $fix));
+        say('A step pass is required. Issue a new one: ' . implode(', ', $fix));
     }
     return 0;
 }
@@ -488,7 +488,7 @@ function cmdDrive(array $f): int
             : [null];
 
         if ($whole && !$runs) {
-            say($left ? 'остальные прогоны ждут человека' : 'живых прогонов в проекте нет');
+            say($left ? 'The remaining runs are waiting for a person.' : 'There are no active runs in the project.');
             return 0;
         }
 
@@ -513,7 +513,7 @@ function cmdDrive(array $f): int
         // Все оставшиеся ждут worker — ждём смены состояния, не опрашивая вхолостую.
         if ($runs && $idle === count($runs)) {
             if (!waitForChange($f, $timeout, $whole, $pictures)) {
-                say("⚠ никто не сдал работу за $timeout с — посмотри, живы ли worker");
+                say("⚠ No work was submitted after $timeout s. Check the workers.");
                 return 4;
             }
         }
@@ -539,11 +539,11 @@ function driveOnce(array $f, ?int $runId, bool $mayFinish, array &$pictures = []
     $label  = (string) ($run['label'] ?? '?');
 
     if (!in_array($run['state'], ['running', 'paused'], true)) {
-        say("$label {$run['state']} — работать не с чем");
+        say("$label {$run['state']} — no work available");
         return 'stop';
     }
     if (!empty($answer['stop'])) {
-        drivesay($where, "$label: человек попросил остановиться", '⚠', $f);
+        drivesay($where, "$label: stop requested by a person", '⚠', $f);
         return 'stop';
     }
 
@@ -568,7 +568,7 @@ function driveOnce(array $f, ?int $runId, bool $mayFinish, array &$pictures = []
                    Исключение одно — ключа нет вовсе (jev_off): Джев выключен,
                    и приёмка идёт как без него. */
                 if ($seen === null && lastFail()->why !== 'jev_off') {
-                    drivesay($where, "$name: джев недоступен — посмотри сам ("
+                    drivesay($where, "$name: Jev is unavailable. Review this manually ("
                         . lastFail()->getMessage() . ')', '⚠', $f);
                     return 'stop';
                 }
@@ -578,7 +578,7 @@ function driveOnce(array $f, ?int $runId, bool $mayFinish, array &$pictures = []
 
                     if ((float) $jev['contradicts'] >= $limit) {
                         sayJev($jev, $name);
-                        drivesay($where, "$name: джев видит противоречие — посмотри сам", '⚠', $f);
+                        drivesay($where, "$name: Jev found a contradiction. Review it manually.", '⚠', $f);
                         return 'stop';
                     }
                     if ((float) $jev['contradicts'] >= 0.5) sayJev($jev, $name);
@@ -588,10 +588,10 @@ function driveOnce(array $f, ?int $runId, bool $mayFinish, array &$pictures = []
             $got = call('POST', 'step.accept', $args + ['no' => $step['no']], $f);
             foreach ($got['warnings'] ?? [] as $warning) drivesay($where, "$label: $warning", '⚠', $f);
             if (!empty($got['warnings'])) {
-                drivesay($where, "$label: приёмка с оговорками — посмотри сам", ' ', $f);
+                drivesay($where, "$label: acceptance raised warnings. Review this manually.", ' ', $f);
                 return 'stop';
             }
-            drivesay($where, "$label · принят {$step['no']}.{$step['attempt']}", '✓', $f);
+            drivesay($where, "$label · accepted {$step['no']}.{$step['attempt']}", '✓', $f);
         }
         return 'moved';
     }
@@ -604,7 +604,7 @@ function driveOnce(array $f, ?int $runId, bool $mayFinish, array &$pictures = []
             if ($type === 'decision') {
                 $choice = condDecide($item, $answer['steps']);
                 if ($choice === null) {
-                    drivesay($where, "$label: ромб {$item['no']} «{$item['title']}» ждёт решения", '◆', $f);
+                    drivesay($where, "$label: decision {$item['no']} «{$item['title']}» needs a decision", '◆', $f);
 
                     /* Условие словесное или посчитать его не вышло — спросим
                        Джева. Ветку он не выбирает, это подсказка leader. */
@@ -612,24 +612,24 @@ function driveOnce(array $f, ?int $runId, bool $mayFinish, array &$pictures = []
                         $seen = quiet(static fn() => call('POST', 'step.jev', $args + ['no' => $item['no']], $f));
                         if ($seen !== null) {
                             $jev = $seen['jev'];
-                            say(sprintf('  джев: ветка %s (уверенность %d%%) — решать всё равно тебе',
+                            say(sprintf('  Jev suggests %s (confidence %d%%). The leader chooses the branch.',
                                 $jev['branch'], round(((float) $jev['confidence']) * 100)));
                         }
                     }
-                    say("  goblin decide {$item['no']} yes|no --why «почему»");
+                    say("  goblin decide {$item['no']} yes|no --why REASON");
                     if (trim((string) ($item['cond'] ?? '')) !== '') {
-                        say("  условие «{$item['cond']}» посчитать не удалось — реши сам");
+                        say("  condition «{$item['cond']}» could not be evaluated. Choose a branch manually.");
                     }
                     return 'stop';
                 }
                 call('POST', 'step.decide', $args + [
                     'no' => $item['no'], 'branch' => $choice['branch'], 'why' => $choice['why'],
                 ], $f);
-                drivesay($where, "$label: ромб {$item['no']} → {$choice['branch']} ({$choice['why']})", '◆', $f);
+                drivesay($where, "$label: decision {$item['no']} → {$choice['branch']} ({$choice['why']})", '◆', $f);
                 continue;
             }
             if ($type === 'gateway') {
-                drivesay($where, "$label: шлюз {$item['no']} «{$item['title']}» ждёт перехода", '⇥', $f);
+                drivesay($where, "$label: gateway {$item['no']} «{$item['title']}» is ready to pass", '⇥', $f);
                 say("  goblin pass {$item['no']}");
                 return 'stop';
             }
@@ -638,7 +638,7 @@ function driveOnce(array $f, ?int $runId, bool $mayFinish, array &$pictures = []
                 'no'    => (string) $item['no'],
                 'note'  => noteWithLead(null),
             ], $f);
-            drivesay($where, "$label: открыт {$opened['step']['no']}.{$opened['step']['attempt']} {$item['title']}", '→', $f);
+            drivesay($where, "$label: opened {$opened['step']['no']}.{$opened['step']['attempt']} {$item['title']}", '→', $f);
         }
         return 'moved';
     }
@@ -647,7 +647,7 @@ function driveOnce(array $f, ?int $runId, bool $mayFinish, array &$pictures = []
     $live = array_filter($answer['steps'], static fn($s) => in_array($s['state'], ['issued', 'running'], true));
     if (!$live) {
         if (!$mayFinish) {
-            drivesay($where, "$label: открывать нечего — нужен ромб, шлюз или finish", ' ', $f);
+            drivesay($where, "$label: no work to open. Choose a branch, pass a gateway or finish the run.", ' ', $f);
             return 'stop';
         }
         return driveFinish($f, $args, $answer, $where, $label);
@@ -666,18 +666,18 @@ function driveFinish(array $f, array $args, array $answer, string $where, string
         $loops[$step['no']] = max($loops[$step['no']] ?? 0, (int) $step['attempt']);
     }
     $rounds = $loops ? max($loops) : 1;
-    $summary = "круг без рук: принято шагов $taken, кругов $rounds";
+    $summary = "automatic run: steps accepted $taken, rounds $rounds";
 
     $got = quiet(static fn() => call('POST', 'run.finish', $args + ['summary' => $summary], $f));
     if ($got === null) {
-        drivesay($where, "$label: прогон пройден, но закрыть не вышло — " . lastFail()->getMessage(), '⚠', $f);
+        drivesay($where, "$label: the run completed but could not be closed — " . lastFail()->getMessage(), '⚠', $f);
         return 'stop';
     }
     if ($said = alreadyLine($got)) {
         drivesay($where, $said, '·', $f);
         return 'stop';
     }
-    drivesay($where, "$label закрыт: $summary", '✓', $f);
+    drivesay($where, "$label closed: $summary", '✓', $f);
     return 'stop';
 }
 
@@ -733,7 +733,7 @@ function condDecide(array $item, array $steps): ?array
     foreach ($vars as $name => $value) $seen[] = "$name=$value";
     return [
         'branch' => $yes ? 'yes' : 'no',
-        'why'    => implode(' ', $seen) . ': условие «' . $cond . '» ' . ($yes ? 'верно' : 'неверно'),
+        'why'    => implode(' ', $seen) . ': condition «' . $cond . '» ' . ($yes ? 'true' : 'false'),
     ];
 }
 
@@ -842,17 +842,17 @@ function condOne(string $part, array $vars, string $said = ''): ?bool
 /** Правило про слова: содержит / начинается / кончается. Не оно — null. */
 function condWord(string $part, string $said): ?bool
 {
-    if (!preg_match('/^(содержит|начинается|кончается)\s+(.+)$/ui', trim($part), $found)) {
+    if (!preg_match('/^(содержит|начинается|кончается|contains|starts\s+with|ends\s+with)\s+(.+)$/ui', trim($part), $found)) {
         return null;
     }
     $what = mb_strtolower(trim($found[2], " \t«»\"'"));
     $text = mb_strtolower(trim($said));
     if ($what === '') return null;
 
-    return match (mb_strtolower($found[1])) {
-        'содержит'   => str_contains($text, $what),
-        'начинается' => str_starts_with($text, $what),
-        'кончается'  => str_ends_with($text, $what),
+    return match (preg_replace('/\s+/u', ' ', mb_strtolower($found[1]))) {
+        'содержит', 'contains'   => str_contains($text, $what),
+        'начинается', 'starts with' => str_starts_with($text, $what),
+        'кончается', 'ends with'  => str_ends_with($text, $what),
         default      => null,
     };
 }

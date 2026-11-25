@@ -9,8 +9,8 @@
    Завершение — это и есть будильник: leader запускает сторожа фоновой
    задачей, а оболочка отдаёт ему последнюю строку, когда процесс кончился.
 
-   Коды выхода: 0 конец прогона · 2 сервер молчит · 3 ждёт приёмки
-                4 шаг завис · 5 сбой шага · 6 прогон стоит без шагов. */
+   Коды выхода: 0 конец Run · 2 сервер молчит · 3 ждёт приёмки
+                4 шаг завис · 5 сбой шага · 6 прогон has been idle for без шагов. */
 
 declare(strict_types=1);
 
@@ -25,7 +25,7 @@ function cmdWatch(array $f): int
 
     $log = is_string($f['log'] ?? null)
         ? $f['log']
-        : dirname(__DIR__, 2) . '/data/сторож/' . date('Y-m-d') . '.log';
+        : dirname(__DIR__, 2) . '/storage/watch/' . date('Y-m-d') . '.log';
     @mkdir(dirname($log), 0777, true);
     $quiet = !empty($f['quiet']);
 
@@ -34,13 +34,13 @@ function cmdWatch(array $f): int
     $runAsk = runIdArg($f) ?? '';
     if ($runAsk === '' && !empty($f['folder'])) {
         $found = liveRun($f);
-        if ($found === 0) return watchBye($log, $quiet, 1, "в папке {$f['folder']} нет идущего прогона");
+        if ($found === 0) return watchBye($log, $quiet, 1, "in folder {$f['folder']} there is no active run");
         $runAsk = (string) $found;
     }
     // Прогон не назвали и пропуска нет — смотрим за всем проектом.
     $whole = $runAsk === '' && tokenOf($f) === '';
 
-    watchLog($log, $quiet, "сторож встал: работа {$timeout}с, приёмка {$accept}с, тишина {$idle}с");
+    watchLog($log, $quiet, "watching: work {$timeout} s, review {$accept} s, idle {$idle} s");
 
     $seen       = [];    // шаг → [состояние, когда заметили]
     $misses     = 0;     // сколько раз подряд сервер не ответил
@@ -50,7 +50,7 @@ function cmdWatch(array $f): int
         if ($whole) {
             $live = liveRuns($f);
             if ($live === []) {
-                return watchBye($log, $quiet, 0, 'живых прогонов в проекте не осталось');
+                return watchBye($log, $quiet, 0, 'No active runs remain in this project.');
             }
             $trouble = null;
             foreach ($live as $id) {
@@ -63,9 +63,9 @@ function cmdWatch(array $f): int
 
         $data = quiet(static fn() => call('GET', 'run.get', $runAsk !== '' ? ['run' => $runAsk] : [], $f, 20));
 
-        // Назвали прогон, а сервер вернул список прогонов — такого прогона нет.
+        // Назвали прогон, а сервер вернул список прогонов — такого Run нет.
         if (is_array($data) && $runAsk !== '' && !isset($data['run'])) {
-            return watchBye($log, $quiet, 1, "прогона $runAsk в проекте нет");
+            return watchBye($log, $quiet, 1, "Run $runAsk was not found in this project");
         }
 
         if (!is_array($data)) {
@@ -73,9 +73,9 @@ function cmdWatch(array $f): int
             // а не сбой сети: будить leader тревогой незачем.
             $why = lastFail()->why;
             if (in_array($why, ['unauthorized', 'not_found'], true)) {
-                return watchBye($log, $quiet, 0, 'прогон закрыт: ' . lastFail()->getMessage());
+                return watchBye($log, $quiet, 0, 'Run closed: ' . lastFail()->getMessage());
             }
-            if (++$misses >= 5) return watchBye($log, $quiet, 2, 'сервер не ответил пять раз подряд');
+            if (++$misses >= 5) return watchBye($log, $quiet, 2, 'The server did not respond five times in a row.');
             sleep($every);
             continue;
         }
@@ -86,7 +86,7 @@ function cmdWatch(array $f): int
         $state = (string) ($run['state'] ?? '?');
 
         if (!in_array($state, ['running', 'paused'], true)) {
-            return watchBye($log, $quiet, 0, "прогон $label закончился: $state");
+            return watchBye($log, $quiet, 0, "run $label ended: $state");
         }
         // Пауза — осознанное решение человека, а не залипание.
         if ($state === 'paused') {
@@ -117,20 +117,20 @@ function cmdWatch(array $f): int
                 case 'running':
                     $alive++;
                     if ($waiting > $timeout) {
-                        return watchBye($log, $quiet, 4, "$name висит «{$where}» уже " . howLong($waiting) . " — worker молчит");
+                        return watchBye($log, $quiet, 4, "$name has been «{$where}» for " . howLong($waiting) . " — no response from the worker");
                     }
                     break;
 
                 case 'submitted':
                     $alive++;
                     if ($waiting > $accept) {
-                        return watchBye($log, $quiet, 3, "$name сдан " . howLong($waiting) . ' назад и ждёт приёмки');
+                        return watchBye($log, $quiet, 3, "$name was submitted " . howLong($waiting) . ' ago and is waiting for review');
                     }
                     break;
 
                 case 'failed':
                 case 'returned':
-                    return watchBye($log, $quiet, 5, "$name в состоянии «{$where}» — нужно решение leader");
+                    return watchBye($log, $quiet, 5, "$name is «{$where}» and needs a decision from the leader");
             }
         }
 
@@ -138,7 +138,7 @@ function cmdWatch(array $f): int
         if ($alive === 0) {
             $quietSince ??= $now;
             if ($now - $quietSince > $idle) {
-                return watchBye($log, $quiet, 6, "прогон $label стоит " . howLong($now - $quietSince) . ': ни одного открытого шага');
+                return watchBye($log, $quiet, 6, "run $label has been idle for " . howLong($now - $quietSince) . ': no open steps');
             }
         } else {
             $quietSince = null;
@@ -195,23 +195,23 @@ function watchRun(array $f, int $runId, int $timeout, int $accept, int $idle,
             case 'issued':
             case 'running':
                 $alive++;
-                if ($waiting > $timeout) return [4, "$name висит «{$where}» уже " . howLong($waiting) . ' — worker молчит'];
+                if ($waiting > $timeout) return [4, "$name has been «{$where}» for " . howLong($waiting) . ' — no response from the worker'];
                 break;
             case 'submitted':
                 $alive++;
-                if ($waiting > $accept) return [3, "$name сдан " . howLong($waiting) . ' назад и ждёт приёмки'];
+                if ($waiting > $accept) return [3, "$name was submitted " . howLong($waiting) . ' ago and is waiting for review'];
                 break;
             case 'failed':
             case 'returned':
-                return [5, "$name в состоянии «{$where}» — нужно решение leader"];
+                return [5, "$name is «{$where}» and needs a decision from the leader"];
         }
     }
 
-    $key = 'тишина-' . $runId;
+    $key = 'idle-' . $runId;
     if ($alive === 0) {
         $seen[$key] ??= ['', $now];
         if ($now - $seen[$key][1] > $idle) {
-            return [6, ($run['label'] ?? "r$runId") . ' стоит ' . howLong($now - $seen[$key][1]) . ': ни одного открытого шага'];
+            return [6, ($run['label'] ?? "r$runId") . ' has been idle for ' . howLong($now - $seen[$key][1]) . ': no open steps'];
         }
     } else {
         unset($seen[$key]);
@@ -219,7 +219,7 @@ function watchRun(array $f, int $runId, int $timeout, int $accept, int $idle,
     return null;
 }
 
-/** Номер идущего или приостановленного прогона папки. */
+/** Номер идущего или приостановленного Run папки. */
 function liveRun(array $f): int
 {
     $data = quiet(static fn() => call('GET', 'run.get', ['folder' => $f['folder']], $f, 20));
@@ -252,7 +252,7 @@ function stepName(array $run, array $step): string
 
 function howLong(int $seconds): string
 {
-    return $seconds < 90 ? $seconds . 'с' : intdiv($seconds, 60) . 'м ' . ($seconds % 60) . 'с';
+    return $seconds < 90 ? $seconds . 's' : intdiv($seconds, 60) . 'm ' . ($seconds % 60) . 's';
 }
 
 /** Флаги команды: нужны там, где событие пишется без них под рукой. */
@@ -293,11 +293,11 @@ function watchSnap(array $data): void
     }
     $was = watchPicture();
     $key = (string) ($run['label'] ?? '?');
-    $was[$key] = $lines ? implode("\n", $lines) : '   всё закрыто, открытых шагов нет';
+    $was[$key] = $lines ? implode("\n", $lines) : '   completed. No open steps remain.';
     watchPicture($was);
 }
 
-/** Строка в свой журнал и на экран; в журнал прогона — через watchTold(). */
+/** Строка в свой журнал и на экран; в журнал Run — через watchTold(). */
 function watchLog(string $log, bool $quiet, string $text): void
 {
     $line = date('H:i:s') . '  ' . $text;
@@ -309,19 +309,19 @@ function watchLog(string $log, bool $quiet, string $text): void
 function watchTold(string $log, bool $quiet, array $run, string $text): void
 {
     watchLog($log, $quiet, $text);
-    journalLine((string) ($run['workDir'] ?? ''), 'сторож: ' . $text);
+    journalLine((string) ($run['workDir'] ?? ''), 'watcher: ' . $text);
 }
 
 /** Последнее слово и выход: именно он будит leader. */
 function watchBye(string $log, bool $quiet, int $code, string $why): int
 {
-    watchLog($log, $quiet, ($code === 0 ? 'конец: ' : 'подъём: ') . $why);
-    foreach (watchDirs() as $dir) journalLine($dir, 'сторож: ' . $why);
+    watchLog($log, $quiet, ($code === 0 ? 'finished: ' : 'attention: ') . $why);
+    foreach (watchDirs() as $dir) journalLine($dir, 'watcher: ' . $why);
 
-    // В ленту прогона — вместе со сводкой: по ней видно, что висело.
+    // В ленту Run — вместе со сводкой: по ней видно, что висело.
     $picture = '';
     foreach (watchPicture() as $label => $lines) $picture .= "$label:\n$lines\n";
-    tell(watchFlags(), 'watch', 'сторож: ' . $why, $picture !== '' ? $picture : null);
+    tell(watchFlags(), 'watch', 'watcher: ' . $why, $picture !== '' ? $picture : null);
     say(($code === 0 ? '✓ ' : '⚠ ') . $why);
 
     // Сводка: что где висит на момент подъёма — чтобы не звать `goblin steps`.

@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="css/canvas.css?v={{version}}">
 <link rel="stylesheet" href="css/elements.css?v={{version}}">
 <link rel="stylesheet" href="css/panel.css?v={{version}}">
+<link rel="stylesheet" href="css/ai-agent.css?v={{version}}">
 <link rel="stylesheet" href="css/run.css?v={{version}}">
 <link rel="stylesheet" href="css/looks.css?v={{version}}">
 <link rel="stylesheet" href="css/classic.css?v={{version}}">
@@ -25,10 +26,12 @@
 <body class="{{bodyclass}}">
 <!-- Записка агенту ИИ (lib/web/page.php → agentNote): скрыта от человека, видна тому, кто читает страницу текстом. -->
 {{agentnote}}
-<!-- Мобильный скин ставим до первой отрисовки: иначе телефон на миг покажет
-     компьютерную раскладку. Правило то же, что currentLook() в canvas/looks.js. -->
+<!-- Выбранный скин ставим до первой отрисовки. -->
 <script>
-  try {
+  const skinParams = new URLSearchParams(location.search);
+  if (skinParams.get('visual') === '1') {
+    document.body.dataset.look = skinParams.get('skin') || 'studio';
+  } else try {
     var look = localStorage.getItem('goblin-look');
     if (look === 'mobile' || (!look && matchMedia('(pointer: coarse)').matches)) document.body.dataset.look = 'mobile';
   } catch (e) {}

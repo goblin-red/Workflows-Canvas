@@ -219,7 +219,7 @@ body[data-look="studio"] .node-title{position:relative;flex:0 0 auto;padding:12p
 body[data-look="studio"] .node-title::before{content:"";position:absolute;left:13px;top:18px;
   width:6px;height:6px;border-radius:50%;background:var(--run,var(--ink-faint))}
 body[data-look="studio"] .node.selected:not([data-step]) .node-title::before{background:var(--accent)}
-body[data-look="studio"] .node-desc{padding:11px 13px 10px;font:12px/1.5 var(--sans);
+body[data-look="studio"] .node-desc{padding:11px 13px 10px;font:14px/1.4 var(--sans);
   color:var(--card-ink-dim,var(--ink-dim));flex:0 1 auto;overflow-wrap:anywhere}
 body[data-look="studio"] .node:not(.area):not(.decision):not(.gateway) .node-title{padding-right:52px}
 body[data-look="studio"] .node:not(.area):not(.decision):not(.gateway) .node-desc{padding-right:13px}
@@ -244,7 +244,8 @@ body[data-look="studio"] .node-badges span{border-radius:5px;background:var(--ho
 /* Обложка — в теле, текст и кнопки на своей непрозрачной поверхности. */
 body[data-look="studio"] .node.has-image .node-inner{gap:0}
 body[data-look="studio"] .node.has-image .node-image-section{position:static;inset:auto;flex:1 1 auto;
-  width:100%;height:0;min-height:24px;max-height:none;margin:0;object-fit:cover;border-bottom:1px solid var(--line)}
+  width:calc(100% - 2 * var(--gap-sm));height:0;min-height:24px;max-height:none;
+  margin:0 var(--gap-sm);object-fit:cover;border-radius:var(--r-sm)}
 body[data-look="studio"] .node.has-image .node-inner :is(.node-title,.node-desc,.node-result){
   text-shadow:none;border-radius:0;color:var(--card-ink,var(--ink));background:transparent}
 body[data-look="studio"] .node.has-image .node-inner .node-title{padding:12px 52px 12px 28px}
@@ -254,15 +255,13 @@ body[data-look="studio"] .node.has-image .node-inner .node-result{padding:4px 7p
 
 /* Развилка и шлюз сохраняют свою форму и точки подключения. */
 body[data-look="studio"] .node.decision .node-card{border:0;border-radius:0;background:var(--card-edge,var(--line-strong));box-shadow:none}
-body[data-look="studio"] .node.decision .node-inner{margin:1px;padding:0 44px 32px;
-  background:var(--card-fill,var(--surface-2));border-radius:0;justify-content:center;align-items:center}
-body[data-look="studio"] .node.decision .node-title{position:absolute;top:10px;left:0;right:0;
-  padding:4px 48px;border:0;white-space:normal;text-align:center}
+body[data-look="studio"] .node.decision .node-inner{margin:1px;
+  background:var(--card-fill,var(--surface-2));border-radius:0}
+body[data-look="studio"] .node.decision .node-title{white-space:normal}
 body[data-look="studio"] .node.decision .node-title::before{display:none}
-body[data-look="studio"] .node.decision .node-desc{padding:0;text-align:center;max-height:42%}
 body[data-look="studio"] .node.decision .node-seq-badge{top:12px;left:-8px;right:auto}
-body[data-look="studio"] .node.decision .node-marks{top:auto;bottom:12px;right:34px}
-body[data-look="studio"] .node.decision .node-result{bottom:36px;left:42px;right:42px;max-width:none;margin:0}
+body[data-look="studio"] .node.decision .node-marks{top:10px;bottom:auto;right:-9px;flex-direction:column}
+body[data-look="studio"] .node.decision .node-result{max-width:100%}
 body[data-look="studio"] .node.node.decision.selected .node-card{background:var(--accent)}
 body[data-look="studio"] .node :is(.node-yes,.node-no){border:0;border-radius:5px;background:var(--surface)}
 body[data-look="studio"] .node.gateway .node-card{border-radius:999px;border-color:var(--card-edge,var(--line-strong));

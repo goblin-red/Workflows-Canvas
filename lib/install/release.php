@@ -11,14 +11,14 @@ declare(strict_types=1);
 
 /** Что берём: папки и файлы от корня Гоблина. */
 const RELEASE_TAKE = [
-    'bin', 'lang', 'lib', 'public', 'sql', 'views', 'instructions/ru', 'instructions/en',
-    'md_backend/ru', 'md_backend/en', 'md_backend/документация', 'md_backend/arch', 'md_backend/homebrew.md',
+    'bin', 'lang', 'lib', 'public', 'sql', 'views', 'instructions/en',
+    'md_backend/docs',
     'config.php', 'config.txt', 'VERSION', '.htaccess',
 ];
 
 /** Что выкидываем — начала путей и имена файлов. */
 const RELEASE_SKIP = ['public/workfiles/', 'public/vendor/.cache', '.DS_Store', '.log', '.tmp',
-    'md_backend/ru/хостинг.md'];   // как выложен canvas.goblin.red — только для хозяина
+    'public/workfiles/'];   // как выложен canvas.goblin.red — только для хозяина
 
 /** Пустые папки, что нужны работающему Гоблину: берём только их .htaccess. */
 const RELEASE_EMPTY = ['data/files/.htaccess', 'storage/.htaccess', 'public/workfiles/.htaccess'];
@@ -58,9 +58,8 @@ function releaseBuild(string $dest): array
     file_put_contents($dest . '/workspace/.gitkeep', '');
 
     // Места документов между метками local-only (пропуска для проверок) — только для рабочего Гоблина.
-    foreach (['md_backend/ru/backend.md', 'md_backend/en/backend.md'] as $rel) {
-        $path = $dest . '/' . $rel;
-        if (!is_file($path)) continue;
+    $path = $dest . '/md_backend/ru/backend.md';
+    if (is_file($path)) {
         $text = (string) file_get_contents($path);
         $text = (string) preg_replace('~<!-- local-only.*?<!-- /local-only -->\n?~su', '', $text);
         file_put_contents($path, $text);
@@ -69,7 +68,7 @@ function releaseBuild(string $dest): array
     foreach (releaseFiles() as $name => $text) file_put_contents($dest . '/' . $name, $text);
 
     $leaks = releaseLeaks($dest);
-    if ($leaks) throw new RuntimeException("в релизе нашлись ключи или пароли:\n  " . implode("\n  ", $leaks));
+    if ($leaks) throw new RuntimeException("Potential credentials in the release:\n  " . implode("\n  ", $leaks));
     return ['files' => $files, 'bytes' => $bytes];
 }
 
@@ -159,7 +158,7 @@ or on ordinary shared hosting.
 - Blocks, decisions (yes/no), gateways, groups, areas (swimlanes), notes, tables and links — numbered hotkeys 1–8
 - Arrows with labels, colors, nested folders (each folder is its own canvas), drag-and-drop between folders
 - Several looks (Working, Classic, Studio, Design, Minimal and more) and a mobile layout
-- English and Russian interface; instructions for agents in the project language
+- English interface, documentation, and instructions for agents
 
 **Runs with AI agents**
 - One link starts a run: the agent reads the server instructions and follows the scheme
@@ -200,7 +199,7 @@ social media, documents, data and APIs, audio, code, Goblin basics.
 
 ```bash
 brew install php                       # macOS does not ship PHP
-git clone https://github.com/goblin-red/workflow.git goblin
+git clone https://github.com/goblin-red/Workflows-Canvas.git goblin
 cd goblin
 php bin/server.php install             # database, admin password, optional AI keys
 php bin/server.php serve               # → http://localhost:8080

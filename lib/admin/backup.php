@@ -33,7 +33,7 @@ function backupSendDb(): void
         echo deflate_add($zip, $text, $last ? ZLIB_FINISH : ZLIB_NO_FLUSH);
     };
 
-    $out("-- Гоблин: дамп базы «$name» из админки, " . date('d.m.Y H:i') . "\n"
+    $out("-- Goblin Canvas: database dump for «$name» from the admin panel, " . date('d.m.Y H:i') . "\n"
         . "SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0;\n"
         // Строки, пережившие каскад ON DELETE SET NULL, проверку CHECK уже не проходят — как и у mysqldump, не проверяем.
         . "/*M!100201 SET check_constraint_checks = 0 */;\n\n");

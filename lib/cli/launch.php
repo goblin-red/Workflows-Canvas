@@ -27,8 +27,8 @@ function cmdLaunch(array $f): int
             foreach ($state['open'] ?? [] as $one) {
                 if ((string) $one['no'] !== (string) arg($f) || ($one['state'] ?? '') === 'issued') continue;
                 if (empty($f['force'])) {
-                    die_("шаг {$one['no']}.{$one['attempt']} уже {$one['state']}: его держит worker. "
-                        . 'Отобрать — goblin reissue ' . $one['no'] . ' или launch --force', 'step_busy');
+                    die_("Step {$one['no']}.{$one['attempt']} is already {$one['state']}; a worker owns it. "
+                        . 'Reassign the step with goblin reissue ' . $one['no'] . ' or launch --force', 'step_busy');
                 }
             }
             $answer = call('POST', 'step.reissue', runArgs($f) + ['no' => arg($f)], $f);
@@ -37,20 +37,20 @@ function cmdLaunch(array $f): int
         }
         $token  = (string) $answer['token'];
         $step   = $answer['step'];
-        say("✓ шаг {$step['no']}.{$step['attempt']} " . ($again ? 'уже выдан движком — взят его пропуск' : 'выдан'));
+        say("✓ step {$step['no']}.{$step['attempt']} " . ($again ? 'already issued by the engine; retrieved its pass' : 'issued'));
     }
 
     // Пакет собираем с --peek: «в работе» шаг сделает сам worker, когда возьмётся.
     $data = call('GET', 'step.get', ['peek' => 1], ['step' => $token]);
     $path = writePackage($data, $step, $token);
-    say("✓ пакет: $path");
+    say("✓ task package: $path");
 
     $mode = is_string($f['mode'] ?? null) ? $f['mode'] : 'cli';
     return match ($mode) {
         'cli'                  => launchCli($f, $data, $step, $token, $path),
         'subagent', 'terminal' => launchMessage($data, $step, $token, $path),
-        'orca'                 => softDie('режим orca ещё не сделан: пока «cli» или «subagent»'),
-        default                => softDie("неизвестный режим запуска: $mode"),
+        'orca'                 => softDie('Orca launch mode is not available. Use cli or subagent.'),
+        default                => softDie("Unknown launch mode: $mode"),
     };
 }
 
@@ -70,16 +70,16 @@ function writePackage(array $data, array $step, string $token): string
     $deny = dirname($path, 2) . '/.htaccess';
     if (is_dir(dirname($deny)) && !is_file($deny)) {
         @file_put_contents($deny,
-            "# Служебное прогона (пакеты, журналы) — только для сервера и CLI, не для браузера.\n"
+            "# Run service files are available to the server and CLI only.\n"
             . "Require all denied\n");
     }
 
-    $text  = "# Задание {$step['no']}.{$step['attempt']}\n\n";
-    $text .= 'Инструкция worker: ' . cfg('url') . "?op=docs.get&file=worker\n\n";
+    $text  = "# Task {$step['no']}.{$step['attempt']}\n\n";
+    $text .= 'Worker instructions: ' . cfg('url') . "?op=docs.get&file=worker\n\n";
     if (!empty($data['spec'])) {
-        $text .= "## ТЗ (дословно из схемы)\n\n" . $data['spec']['text'] . "\n\n";
+        $text .= "## Task specification (from the scheme)\n\n" . $data['spec']['text'] . "\n\n";
     }
-    $text .= "## Пакет\n\n```json\n"
+    $text .= "## Task package\n\n```json\n"
            . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)
            . "\n```\n";
 
@@ -100,7 +100,7 @@ function shellValue(string $value, string $what): string
     // Обратная косая, кавычки и перевод строки — тоже знаки оболочки.
     $bad = '`$;&|<>()*?!' . '\\' . '"' . "'\n\r";
     if (strpbrk($value, $bad) !== false) {
-        softDie("в значении «{$what}» есть знаки оболочки: " . $value);
+        softDie("The $what value contains shell metacharacters: " . $value);
     }
     return $value;
 }
@@ -110,24 +110,23 @@ function launchCli(array $f, array $data, array $step, string $token, string $pa
 {
     $line = is_string($f['cmd'] ?? null) ? $f['cmd'] : cliCommand($data);
     if ($line === '') {
-        say('в config.txt у этого CLI нет строки запуска — вот команда, запусти сам:');
+        say('This CLI has no launch command in config.txt. Run it manually with these options:');
         say('  GOBLIN_URL=' . cfg('url') . ' GOBLIN_PROJECT=' . cfg('project')
-            . " GOBLIN_STEP=$token <твой CLI> «прочитай $path и работай»");
+            . " GOBLIN_STEP=$token <your CLI> \"Read $path and follow its instructions\"");
         return 0;
     }
 
     $agent = $data['agent'] ?? [];
-    $line  = str_replace(
-        ['{пакет}', '{шаг}', '{папка}', '{модель}', '{усилие}'],
-        [
-            shellValue($path, 'пакет'),
-            shellValue("{$step['no']}.{$step['attempt']}", 'шаг'),
-            shellValue((string) ($data['workDir'] ?? '.'), 'папка'),
-            shellValue((string) ($agent['model'] ?? ''), 'модель'),
-            shellValue((string) ($agent['effort'] ?? ''), 'усилие'),
-        ],
-        $line
-    );
+    $values = [
+        shellValue($path, 'package'),
+        shellValue("{$step['no']}.{$step['attempt']}", 'step'),
+        shellValue((string) ($data['workDir'] ?? '.'), 'folder'),
+        shellValue((string) ($agent['model'] ?? ''), 'model'),
+        shellValue((string) ($agent['effort'] ?? ''), 'effort'),
+    ];
+    $names = ['{package}', '{step}', '{folder}', '{model}', '{effort}',
+        '{пакет}', '{шаг}', '{папка}', '{модель}', '{усилие}'];
+    $line = strtr($line, array_combine($names, [...$values, ...$values]));
 
     // Окружение worker: адрес, проект и пропуск шага.
     $env = 'GOBLIN_URL=' . escapeshellarg(cfg('url'))
@@ -136,8 +135,8 @@ function launchCli(array $f, array $data, array $step, string $token, string $pa
     $where = (string) ($data['workDir'] ?? '');
     $cd    = $where !== '' ? 'cd ' . escapeshellarg($where) . ' && ' : '';
 
-    say("→ запускаю worker: $line");
-    tell($f, 'launch', "запущен worker: $line", "рабочая папка: $where", ['no' => (string) $step['no']]);
+    say("→ launching worker: $line");
+    tell($f, 'launch', "Worker started: $line", "working folder: $where", ['no' => (string) $step['no']]);
 
     if (!empty($f['wait'])) {
         $code = 0;
@@ -147,8 +146,8 @@ function launchCli(array $f, array $data, array $step, string $token, string $pa
         $out = (string) ob_get_clean();
         echo $out;
 
-        say("worker завершился с кодом $code");
-        tell($f, 'console', 'вывод терминала · ' . round(strlen($out) / 1024, 1) . ' КБ', $out, [
+        say("Worker exited with code $code");
+        tell($f, 'console', 'terminal output · ' . round(strlen($out) / 1024, 1) . ' KB', $out, [
             'no' => (string) $step['no'],
             'tookMs' => (string) round((microtime(true) - $began) * 1000),
             'meta' => json_encode(['code' => $code], JSON_UNESCAPED_UNICODE),
@@ -159,25 +158,25 @@ function launchCli(array $f, array $data, array $step, string $token, string $pa
     // В фоне: вывод worker ложится рядом с пакетом задания, чтобы leader мог посмотреть.
     $log = preg_replace('/\.md$/', '', $path) . '.log';
     exec("$cd$env nohup $line > " . escapeshellarg($log) . " 2>&1 &");
-    say("worker работает в фоне, вывод: $log");
-    say('следи за `goblin next` или запусти сторожа: goblin watch --quiet &');
+    say("Worker is running in the background. Output: $log");
+    say('Use `goblin next` or start the watcher with goblin watch --quiet &.');
     return 0;
 }
 
 /** Готовое сообщение worker, который уже сидит в открытом терминале. */
 function launchMessage(array $data, array $step, string $token, string $path): int
 {
-    say('--- скопируй это worker ---');
-    say("Задание {$step['no']}.{$step['attempt']}. Инструкция worker: instructions/old/worker.md");
-    say("Пакет задания: $path");
-    say('Рабочая папка: ' . ($data['workDir'] ?? '—'));
-    say('Окружение:');
+    say('--- send this to the worker ---');
+    say("Task {$step['no']}.{$step['attempt']}. Worker instructions: goblin help worker");
+    say("Task package: $path");
+    say('Working folder: ' . ($data['workDir'] ?? '—'));
+    say('Environment:');
     say('  export GOBLIN_URL=' . cfg('url'));
     say('  export GOBLIN_PROJECT=' . cfg('project'));
     say("  export GOBLIN_STEP=$token");
-    say('Порядок: goblin task → работа по ТЗ → goblin submit --result "…".');
-    say("Отпишись строкой: ok {$step['no']}.{$step['attempt']} или fail {$step['no']}.{$step['attempt']}: причина");
-    say('--- конец сообщения ---');
+    say('Run goblin task, complete the specification, then use goblin submit --result "…".');
+    say("Reply with: ok {$step['no']}.{$step['attempt']} or fail {$step['no']}.{$step['attempt']}: reason");
+    say('--- end of message ---');
     return 0;
 }
 

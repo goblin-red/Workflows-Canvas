@@ -20,7 +20,7 @@ function stepJob(): void
 
         if ($action === 'add') {
             $paid = input('paid');
-            $limit = $step['element_id'] ? (int) runProp((int) $step['element_id'], 'paid_calls', 1) : 1;
+            $limit = (int) (runStepProps($run, $step)['paid_calls'] ?? 1);
             $spent = (int) dbValue("SELECT COUNT(*) FROM run_jobs WHERE step_id = ? AND paid = 1 AND state <> 'rejected'", [$step['id']]);
             if (($paid === null || $paid) && $spent >= $limit) {
                 throw new ApiError(ta('agents.jobs.paid_limit', ['limit' => $limit]), 'conflict', ['code2' => 'paid_limit']);

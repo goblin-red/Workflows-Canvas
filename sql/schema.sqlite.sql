@@ -3,8 +3,8 @@
 PRAGMA foreign_keys = OFF;
 
 -- ───────────────────────────────────────────────────────────────
---  Гоблин v2 — схема базы целиком. 28 таблиц.
---  Снята с живой базы (SHOW CREATE TABLE) и соответствует миграциям 001–034:
+--  Гоблин — схема базы целиком.
+--  Снята с живой базы (SHOW CREATE TABLE) и соответствует миграциям 001–036:
 --  добавляя миграцию, обновляйте и этот файл.
 --
 --  Иерархия: проект → папка (холст) → [группа] → [область] → элемент
@@ -44,7 +44,7 @@ CREATE TABLE "projects" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "url_key" TEXT NOT NULL,
   "title" TEXT COLLATE NOCASE NOT NULL DEFAULT '',
-  "lang" TEXT COLLATE NOCASE NOT NULL DEFAULT 'ru',
+  "lang" TEXT COLLATE NOCASE NOT NULL DEFAULT 'en',
   "files_server" INTEGER NOT NULL DEFAULT 0,
   "owner_id" INTEGER DEFAULT NULL,
   "rev" INTEGER NOT NULL DEFAULT 0,
@@ -62,6 +62,66 @@ CREATE UNIQUE INDEX "projects__uq_projects_key" ON "projects" ("url_key");
 CREATE INDEX "projects__ix_projects_owner" ON "projects" ("owner_id");
 CREATE TRIGGER "tr_projects_updated_at" AFTER UPDATE ON "projects" FOR EACH ROW WHEN NEW."updated_at" IS OLD."updated_at"
 BEGIN UPDATE "projects" SET "updated_at" = (strftime('%Y-%m-%d %H:%M:%f','now','localtime')) WHERE rowid = NEW.rowid; END;
+
+
+-- ── Граф ──
+
+CREATE TABLE "blocks" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+  "scope_id" INTEGER NOT NULL,
+  "kind" TEXT NOT NULL,
+  "title" TEXT COLLATE NOCASE NOT NULL DEFAULT '',
+  "description" TEXT NOT NULL DEFAULT '',
+  "properties" TEXT NOT NULL DEFAULT '{}' CHECK (json_valid("properties")),
+  "appearance" TEXT NOT NULL DEFAULT '{}' CHECK (json_valid("appearance")),
+  "rev" INTEGER NOT NULL DEFAULT 0,
+  "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now','localtime')),
+  "updated_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now','localtime')),
+  CONSTRAINT "fk_blocks_scope" FOREIGN KEY ("scope_id") REFERENCES "projects" ("id") ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX "blocks__uq_blocks_scope_id" ON "blocks" ("scope_id","id");
+CREATE TRIGGER "tr_blocks_updated_at" AFTER UPDATE ON "blocks" FOR EACH ROW WHEN NEW."updated_at" IS OLD."updated_at"
+BEGIN UPDATE "blocks" SET "updated_at" = (strftime('%Y-%m-%d %H:%M:%f','now','localtime')) WHERE rowid = NEW.rowid; END;
+
+
+CREATE TABLE "arrows" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+  "scope_id" INTEGER NOT NULL,
+  "source_id" INTEGER NOT NULL,
+  "target_id" INTEGER NOT NULL,
+  "kind" TEXT NOT NULL CHECK ("kind" IN ('link','flow','contains')),
+  "direction" TEXT NOT NULL CHECK ("direction" IN ('forward','reverse','both','none')),
+  "sort" INTEGER NOT NULL DEFAULT 0,
+  "properties" TEXT NOT NULL DEFAULT '{}' CHECK (json_valid("properties")),
+  "appearance" TEXT NOT NULL DEFAULT '{}' CHECK (json_valid("appearance")),
+  "rev" INTEGER NOT NULL DEFAULT 0,
+  "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now','localtime')),
+  "updated_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now','localtime')),
+  CONSTRAINT "fk_arrows_source" FOREIGN KEY ("scope_id","source_id") REFERENCES "blocks" ("scope_id","id") ON DELETE CASCADE,
+  CONSTRAINT "fk_arrows_target" FOREIGN KEY ("scope_id","target_id") REFERENCES "blocks" ("scope_id","id") ON DELETE CASCADE,
+  CONSTRAINT "ck_arrows_direction" CHECK (("kind" = 'link' AND "direction" IN ('forward','reverse','both','none')) OR ("kind" = 'flow' AND "direction" IN ('forward','reverse')) OR ("kind" = 'contains' AND "direction" = 'forward' AND "source_id" <> "target_id"))
+);
+CREATE UNIQUE INDEX "arrows__uq_arrows_scope_id" ON "arrows" ("scope_id","id");
+CREATE INDEX "arrows__ix_arrows_source" ON "arrows" ("scope_id","source_id","kind","target_id");
+CREATE INDEX "arrows__ix_arrows_target" ON "arrows" ("scope_id","target_id","kind","source_id");
+CREATE TRIGGER "tr_arrows_updated_at" AFTER UPDATE ON "arrows" FOR EACH ROW WHEN NEW."updated_at" IS OLD."updated_at"
+BEGIN UPDATE "arrows" SET "updated_at" = (strftime('%Y-%m-%d %H:%M:%f','now','localtime')) WHERE rowid = NEW.rowid; END;
+
+
+CREATE TABLE "graph_legacy_refs" (
+  "scope_id" INTEGER NOT NULL,
+  "legacy_kind" TEXT NOT NULL CHECK ("legacy_kind" IN ('project','folder','element','agent','asset')),
+  "legacy_id" INTEGER NOT NULL,
+  "block_id" INTEGER DEFAULT NULL,
+  "arrow_id" INTEGER DEFAULT NULL,
+  PRIMARY KEY ("scope_id","legacy_kind","legacy_id"),
+  CONSTRAINT "fk_graph_legacy_block" FOREIGN KEY ("scope_id","block_id") REFERENCES "blocks" ("scope_id","id") ON DELETE CASCADE,
+  CONSTRAINT "fk_graph_legacy_arrow" FOREIGN KEY ("scope_id","arrow_id") REFERENCES "arrows" ("scope_id","id") ON DELETE CASCADE,
+  CONSTRAINT "ck_graph_legacy_target" CHECK (("block_id" IS NULL) <> ("arrow_id" IS NULL)),
+  CONSTRAINT "ck_graph_legacy_kind" CHECK ("legacy_kind" IN ('project','folder','element','agent','asset') AND ("legacy_kind" <> 'project' OR ("legacy_id" = "scope_id" AND "block_id" IS NOT NULL)))
+);
+CREATE INDEX "graph_legacy_refs__ix_graph_legacy_block" ON "graph_legacy_refs" ("scope_id","block_id");
+CREATE INDEX "graph_legacy_refs__ix_graph_legacy_arrow" ON "graph_legacy_refs" ("scope_id","arrow_id");
 
 
 -- ── Структура ──
@@ -219,7 +279,7 @@ BEGIN UPDATE "assets" SET "updated_at" = (strftime('%Y-%m-%d %H:%M:%f','now','lo
 CREATE TABLE "runs" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "project_id" INTEGER NOT NULL,
-  "folder_id" INTEGER NOT NULL,
+  "folder_id" INTEGER DEFAULT NULL,
   "no" INTEGER NOT NULL,
   "title" TEXT COLLATE NOCASE NOT NULL DEFAULT '',
   "state" TEXT NOT NULL DEFAULT 'running' CHECK ("state" IN ('running','paused','stopped','done','failed')),
@@ -244,16 +304,21 @@ CREATE TABLE "runs" (
   "show_pause" REAL NOT NULL DEFAULT 0.0,
   "next_move_at" TEXT DEFAULT NULL,
   "wait_for" TEXT COLLATE NOCASE NOT NULL DEFAULT '',
+  "parent_block_id" INTEGER DEFAULT NULL,
+  "graph_snapshot" TEXT DEFAULT NULL,
   CONSTRAINT "fk_runs_folder" FOREIGN KEY ("folder_id") REFERENCES "folders" ("id") ON DELETE CASCADE,
   CONSTRAINT "fk_runs_lead" FOREIGN KEY ("lead_agent_id") REFERENCES "agents" ("id") ON DELETE SET NULL,
   CONSTRAINT "fk_runs_project" FOREIGN KEY ("project_id") REFERENCES "projects" ("id") ON DELETE CASCADE,
-  CONSTRAINT "fk_runs_user" FOREIGN KEY ("started_by") REFERENCES "users" ("id") ON DELETE SET NULL
+  CONSTRAINT "fk_runs_user" FOREIGN KEY ("started_by") REFERENCES "users" ("id") ON DELETE SET NULL,
+  CONSTRAINT "ck_runs_scene" CHECK (("folder_id" IS NULL) <> ("parent_block_id" IS NULL)),
+  CONSTRAINT "ck_runs_snapshot" CHECK (("parent_block_id" IS NULL AND "graph_snapshot" IS NULL) OR ("parent_block_id" IS NOT NULL AND "graph_snapshot" IS NOT NULL AND json_valid("graph_snapshot")))
 );
 CREATE UNIQUE INDEX "runs__uq_runs_no" ON "runs" ("project_id","no");
 CREATE INDEX "runs__ix_runs_folder" ON "runs" ("folder_id","started_at");
 CREATE INDEX "runs__ix_runs_rev" ON "runs" ("project_id","rev");
 CREATE INDEX "runs__fk_runs_lead" ON "runs" ("lead_agent_id");
 CREATE INDEX "runs__fk_runs_user" ON "runs" ("started_by");
+CREATE INDEX "runs__ix_runs_parent" ON "runs" ("project_id","parent_block_id","state");
 
 
 CREATE TABLE "run_steps" (
@@ -288,12 +353,17 @@ CREATE TABLE "run_steps" (
   "vars" TEXT DEFAULT NULL,
   "verdict" TEXT DEFAULT NULL,
   "delivered_run_id" INTEGER DEFAULT NULL,
+  "block_id" INTEGER DEFAULT NULL,
+  "block_kind" TEXT COLLATE NOCASE DEFAULT NULL,
+  "via_arrow_id" INTEGER DEFAULT NULL,
+  "chosen_arrow_id" INTEGER DEFAULT NULL,
   CONSTRAINT "fk_steps_agent" FOREIGN KEY ("agent_id") REFERENCES "agents" ("id") ON DELETE SET NULL,
   CONSTRAINT "fk_steps_chosen" FOREIGN KEY ("chosen_edge_id") REFERENCES "elements" ("id") ON DELETE SET NULL,
   CONSTRAINT "fk_steps_element" FOREIGN KEY ("element_id") REFERENCES "elements" ("id") ON DELETE SET NULL,
   CONSTRAINT "fk_steps_project" FOREIGN KEY ("project_id") REFERENCES "projects" ("id") ON DELETE CASCADE,
   CONSTRAINT "fk_steps_run" FOREIGN KEY ("run_id") REFERENCES "runs" ("id") ON DELETE CASCADE,
-  CONSTRAINT "fk_steps_via" FOREIGN KEY ("via_edge_id") REFERENCES "elements" ("id") ON DELETE SET NULL
+  CONSTRAINT "fk_steps_via" FOREIGN KEY ("via_edge_id") REFERENCES "elements" ("id") ON DELETE SET NULL,
+  CONSTRAINT "ck_steps_graph_refs" CHECK ("block_id" IS NULL OR ("element_id" IS NULL AND "via_edge_id" IS NULL AND "chosen_edge_id" IS NULL AND "block_kind" IS NOT NULL))
 );
 CREATE UNIQUE INDEX "run_steps__uq_steps_attempt" ON "run_steps" ("run_id","element_no","attempt");
 CREATE INDEX "run_steps__ix_steps_rev" ON "run_steps" ("project_id","rev");
@@ -302,6 +372,7 @@ CREATE INDEX "run_steps__ix_steps_agent" ON "run_steps" ("agent_id");
 CREATE INDEX "run_steps__ix_steps_state" ON "run_steps" ("run_id","state");
 CREATE INDEX "run_steps__fk_steps_via" ON "run_steps" ("via_edge_id");
 CREATE INDEX "run_steps__fk_steps_chosen" ON "run_steps" ("chosen_edge_id");
+CREATE INDEX "run_steps__ix_steps_run_block" ON "run_steps" ("run_id","block_id");
 
 
 CREATE TABLE "run_jobs" (
@@ -338,17 +409,19 @@ CREATE TABLE "run_marks" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "project_id" INTEGER NOT NULL,
   "run_id" INTEGER NOT NULL,
-  "edge_id" INTEGER NOT NULL,
+  "edge_id" INTEGER DEFAULT NULL,
   "from_step_id" INTEGER NOT NULL,
   "pass" INTEGER NOT NULL DEFAULT 1,
   "taken_by_step_id" INTEGER DEFAULT NULL,
   "taken_at" TEXT DEFAULT NULL,
   "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now','localtime')),
+  "arrow_id" INTEGER DEFAULT NULL,
   CONSTRAINT "fk_marks_by" FOREIGN KEY ("taken_by_step_id") REFERENCES "run_steps" ("id") ON DELETE SET NULL,
   CONSTRAINT "fk_marks_edge" FOREIGN KEY ("edge_id") REFERENCES "elements" ("id") ON DELETE CASCADE,
   CONSTRAINT "fk_marks_from" FOREIGN KEY ("from_step_id") REFERENCES "run_steps" ("id") ON DELETE CASCADE,
   CONSTRAINT "fk_marks_project" FOREIGN KEY ("project_id") REFERENCES "projects" ("id") ON DELETE CASCADE,
-  CONSTRAINT "fk_marks_run" FOREIGN KEY ("run_id") REFERENCES "runs" ("id") ON DELETE CASCADE
+  CONSTRAINT "fk_marks_run" FOREIGN KEY ("run_id") REFERENCES "runs" ("id") ON DELETE CASCADE,
+  CONSTRAINT "ck_marks_graph_edge" CHECK (("edge_id" IS NULL) <> ("arrow_id" IS NULL))
 );
 CREATE UNIQUE INDEX "run_marks__uq_marks_once" ON "run_marks" ("run_id","edge_id","from_step_id");
 CREATE INDEX "run_marks__ix_marks_free" ON "run_marks" ("run_id","taken_by_step_id");
@@ -356,6 +429,7 @@ CREATE INDEX "run_marks__ix_marks_project" ON "run_marks" ("project_id");
 CREATE INDEX "run_marks__fk_marks_edge" ON "run_marks" ("edge_id");
 CREATE INDEX "run_marks__fk_marks_from" ON "run_marks" ("from_step_id");
 CREATE INDEX "run_marks__fk_marks_by" ON "run_marks" ("taken_by_step_id");
+CREATE UNIQUE INDEX "run_marks__uq_marks_arrow_once" ON "run_marks" ("run_id","arrow_id","from_step_id");
 
 
 CREATE TABLE "run_events" (
@@ -469,36 +543,16 @@ BEGIN UPDATE "template_categories" SET "updated_at" = (strftime('%Y-%m-%d %H:%M:
 -- Разделы — как в живой базе на 30.09: паспорт и перевод (i18n.en), чтобы свежая установка
 -- показывала каталог и по-английски. Правят их в админке; посев — снимок, а не источник правды.
 INSERT OR IGNORE INTO template_categories (`key`, title, icon, about, sort, passport, i18n) VALUES
-  ('sites', 'Сайты и лендинги', 'globe', 'Лендинги, страницы товара, многостраничные сайты и доработка готовых', 10,
-   '{"skeleton":"Бриф → тексты → картинки → сборка страницы → проверка (картинки на месте, один h1, форма) → ромб; нет — пересборка","questions":["Что продаём и кому?","Какое действие должен сделать посетитель?","Есть свои тексты и фото?","Каким сервисом делать картинки?"],"tune":["бриф","разделы страницы","стиль картинок","кругов пересборки"],"pitfalls":["Картинки подключать относительными путями рядом со страницей","Тексты — отдельным файлом, сборка берёт их дословно"]}',
-   '{"en":{"title":"Sites and landing pages","about":"Landing pages, product pages, multi-page sites and finishing existing ones","passport":{"skeleton":"Brief → texts → images → page build → check (images in place, one h1, form) → decision; no — rebuild","questions":["What do we sell and to whom?","What action should the visitor take?","Do you have your own texts and photos?","Which service should make the images?"],"tune":["brief","page sections","image style","rebuild rounds"],"pitfalls":["Link images with relative paths next to the page","Texts go in a separate file, the build takes them word for word"]}}}'),
-  ('photo', 'Фото', 'image', 'Генерация, ретушь, вырезка фона, серии карточек товара', 20,
-   '{"skeleton":"Исходник из in/ или генерация → обработка (фон, размер, серия) → скриптовая сборка (PIL) → проверка размеров и краёв → ромб","questions":["Есть исходные фото?","Для какой площадки и каких размеров?","Какой стиль?","Каким сервисом генерировать или править?"],"tune":["стиль и сюжеты","размеры","поля и подписи"],"pitfalls":["Текст на картинку ставит скрипт, не генератор","Размеры проверять скриптом, не на глаз"]}',
-   '{"en":{"title":"Photo","about":"Generation, retouching, background removal, series of product cards","passport":{"skeleton":"Source from in/ or generation → processing (background, size, series) → scripted build (PIL) → check of sizes and edges → decision","questions":["Do you have source photos?","For which platform and which sizes?","What style?","Which service should generate or edit?"],"tune":["style and subjects","sizes","margins and captions"],"pitfalls":["Text on the image is added by a script, not by the generator","Check sizes with a script, not by eye"]}}}'),
-  ('video', 'Видео', 'film', 'Ролики из картинок, нарезка, озвученные клипы, анимация', 30,
-   '{"skeleton":"Сценарий → кадры и озвучка параллельно → сборка ffmpeg → проверка ffprobe (длительность, потоки, размер) → ромб","questions":["О чём ролик и какой длины?","Есть исходное видео или картинки?","Какой формат: горизонтальный или вертикальный?","Нужна ли озвучка и каким голосом?"],"tune":["число кадров и длина","формат кадра","голос"],"pitfalls":["drawtext есть не во всех сборках ffmpeg — титры рисовать PNG и накладывать","Резать и склеивать с перекодированием в один формат"]}',
-   '{"en":{"title":"Video","about":"Videos from images, cutting, voiced clips, animation","passport":{"skeleton":"Script → frames and voice-over in parallel → ffmpeg assembly → ffprobe check (duration, streams, size) → decision","questions":["What is the video about and how long?","Do you have source video or images?","Which format: horizontal or vertical?","Do you need a voice-over, and which voice?"],"tune":["number of frames and length","frame format","voice"],"pitfalls":["drawtext is not in every ffmpeg build — draw the titles as PNG and overlay them","Cut and join with re-encoding to one format"]}}}'),
-  ('texts', 'Тексты и контент', 'text', 'Статьи, описания, переводы, редактура и контент-планы', 40,
-   '{"skeleton":"Тема или исходник → черновик → проверка скриптом (объём, структура, длины) → ромб, нет — переделка → редактура","questions":["О чём текст и для кого?","Какой объём?","Какой тон?","Есть исходный текст или список?"],"tune":["тема и аудитория","границы объёма","тон и язык"],"pitfalls":["Объём считать скриптом — модель пишет короче обещанного","Проверка по каждому элементу пачки, а не в среднем"]}',
-   '{"en":{"title":"Texts and content","about":"Articles, descriptions, translations, editing and content plans","passport":{"skeleton":"Topic or source → draft → script check (size, structure, lengths) → decision, no — redo → editing","questions":["What is the text about and for whom?","What length?","What tone?","Is there a source text or a list?"],"tune":["topic and audience","length limits","tone and language"],"pitfalls":["Count the length with a script — the model writes shorter than promised","Check every item of the batch, not the average"]}}}'),
-  ('social', 'Соцсети и маркетинг', 'megaphone', 'Посты с картинками, рекламные креативы, серии публикаций', 50,
-   '{"skeleton":"Бриф или оффер → тексты и картинки параллельно → вёрстка или сборка публикаций → проверка","questions":["Для какого бренда и соцсети?","Какие рубрики или оффер?","Сколько картинок?","Каким сервисом делать картинки?"],"tune":["бренд, рубрики, оффер","число картинок","размер креатива"],"pitfalls":["Картинки делать по плану, не по готовым текстам — ветки идут параллельно","Заголовок на картинку — скриптом с переносами по ширине"]}',
-   '{"en":{"title":"Social media and marketing","about":"Posts with images, ad creatives, series of publications","passport":{"skeleton":"Brief or offer → texts and images in parallel → layout or assembly of publications → check","questions":["For which brand and social network?","Which rubrics or offer?","How many images?","Which service should make the images?"],"tune":["brand, rubrics, offer","number of images","creative size"],"pitfalls":["Make the images from the plan, not from the finished texts — the branches run in parallel","The headline goes on the image by a script with line breaks by width"]}}}'),
-  ('docs', 'Документы и отчёты', 'file', 'Отчёты, КП, презентации и сводки из данных', 60,
-   '{"skeleton":"Бриф или данные → расчёты и графики параллельно → текст → вёрстка HTML (печать A4) → проверка обязательных частей","questions":["Какой документ и для кого?","Какие данные или бриф?","Что обязательно должно быть в документе?"],"tune":["бриф или данные","разделы","оформление"],"pitfalls":["Цифры в выводах брать из файла расчётов","Цена, сроки, контакты — только из брифа"]}',
-   '{"en":{"title":"Documents and reports","about":"Reports, proposals, presentations and summaries from data","passport":{"skeleton":"Brief or data → calculations and charts in parallel → text → HTML layout (A4 print) → check of required parts","questions":["Which document and for whom?","Which data or brief?","What must be in the document?"],"tune":["brief or data","sections","design"],"pitfalls":["Take the figures in the conclusions from the calculations file","Price, terms, contacts — only from the brief"]}}}'),
-  ('data', 'Данные и API', 'database', 'Запросы к сервисам, выгрузки, таблицы и сводки', 70,
-   '{"skeleton":"Параметры или таблица → запросы или разбор (параллельно, если источников несколько) → очистка или сводка → проверка тем же скриптом","questions":["Какие данные и откуда?","Что считать проблемой или нормой?","В каком виде нужен результат?"],"tune":["источники и параметры","правила чистки","формат результата"],"pitfalls":["curl всегда с таймаутом","Повторная проверка — тем же скриптом, что первая"]}',
-   '{"en":{"title":"Data and APIs","about":"Requests to services, exports, tables and summaries","passport":{"skeleton":"Parameters or a table → requests or parsing (in parallel if there are several sources) → cleaning or a summary → check by the same script","questions":["Which data and from where?","What counts as a problem or as normal?","In what form do you need the result?"],"tune":["sources and parameters","cleaning rules","result format"],"pitfalls":["curl always with a timeout","Re-check with the same script as the first one"]}}}'),
-  ('audio', 'Аудио и озвучка', 'music', 'Озвучка текста, подкасты, музыка и звуковые дорожки', 80,
-   '{"skeleton":"Текст → разбивка на фразы → озвучка → склейка или сведение ffmpeg (loudnorm) → проверка длительности","questions":["Какой текст?","Какой голос и язык?","Нужна ли музыка?","Каким сервисом озвучивать?"],"tune":["голос","паузы","громкость и музыка"],"pitfalls":["Все куски к одной частоте перед склейкой","Голос громче подложки на 10–15 дБ"]}',
-   '{"en":{"title":"Audio and voice-over","about":"Voice-over of a text, podcasts, music and sound tracks","passport":{"skeleton":"Text → split into phrases → voice-over → ffmpeg joining or mixing (loudnorm) → duration check","questions":["Which text?","Which voice and language?","Do you need music?","Which service should voice it?"],"tune":["voice","pauses","volume and music"],"pitfalls":["All pieces to one sample rate before joining","The voice louder than the background by 10–15 dB"]}}}'),
-  ('code', 'Код и автоматизация', 'code', 'Скрипты, мини-приложения, проверки и автоматизация рутины', 90,
-   '{"skeleton":"Требования → код и тесты параллельно (тесты по требованиям) → прогон тестов или проверка синтаксиса → ромб, нет — исправление кода","questions":["Что должна делать программа?","Язык и ограничения (без библиотек?)","Какие крайние случаи важны?"],"tune":["требования","язык","кругов исправления"],"pitfalls":["Тесты по требованиям, не по коду","Синтаксис JS проверять node --check до браузера"]}',
-   '{"en":{"title":"Code and automation","about":"Scripts, mini apps, checks and routine automation","passport":{"skeleton":"Requirements → code and tests in parallel (tests from the requirements) → test run or syntax check → decision, no — fix the code","questions":["What should the program do?","Language and limits (no libraries?)","Which edge cases matter?"],"tune":["requirements","language","fix rounds"],"pitfalls":["Tests from the requirements, not from the code","Check JS syntax with node --check before the browser"]}}}'),
-  ('basics', 'Основы Гоблина', 'book', 'Учебные схемы: цепочка, развилка, цикл, параллель, проверка', 100,
-   '{"skeleton":"Учебные схемы: цепочка, ромб с ветками и слиянием any, цикл с back и max_attempts, параллель со слиянием all","questions":["Какой механизм показать?","Что должны делать блоки?"],"tune":["условия ромбов","пределы кругов","тема"],"pitfalls":["После ромба — join any, после параллели — join all","У блоков круга — max_attempts"]}',
-   '{"en":{"title":"Goblin basics","about":"Learning schemes: a chain, a fork, a loop, parallel branches, a check","passport":{"skeleton":"Learning schemes: a chain, a decision with branches and an any-merge, a loop with back and max_attempts, parallel branches with an all-merge","questions":["Which mechanism to show?","What should the blocks do?"],"tune":["decision conditions","round limits","topic"],"pitfalls":["After a decision — join any, after parallel branches — join all","The blocks of a loop have max_attempts"]}}}');
+  ('sites', 'Sites and landing pages', 'globe', 'Landing pages, product pages, multi-page sites and finishing existing ones', 10, '{"skeleton":"Brief → texts → images → page build → check (images in place, one h1, form) → decision; no — rebuild","questions":["What do we sell and to whom?","What action should the visitor take?","Do you have your own texts and photos?","Which service should make the images?"],"tune":["brief","page sections","image style","rebuild rounds"],"pitfalls":["Link images with relative paths next to the page","Texts go in a separate file, the build takes them word for word"]}', '{}'),
+  ('photo', 'Photo', 'image', 'Generation, retouching, background removal, series of product cards', 20, '{"skeleton":"Source from in/ or generation → processing (background, size, series) → scripted build (PIL) → check of sizes and edges → decision","questions":["Do you have source photos?","For which platform and which sizes?","What style?","Which service should generate or edit?"],"tune":["style and subjects","sizes","margins and captions"],"pitfalls":["Text on the image is added by a script, not by the generator","Check sizes with a script, not by eye"]}', '{}'),
+  ('video', 'Video', 'film', 'Videos from images, cutting, voiced clips, animation', 30, '{"skeleton":"Script → frames and voice-over in parallel → ffmpeg assembly → ffprobe check (duration, streams, size) → decision","questions":["What is the video about and how long?","Do you have source video or images?","Which format: horizontal or vertical?","Do you need a voice-over, and which voice?"],"tune":["number of frames and length","frame format","voice"],"pitfalls":["drawtext is not in every ffmpeg build — draw the titles as PNG and overlay them","Cut and join with re-encoding to one format"]}', '{}'),
+  ('texts', 'Texts and content', 'text', 'Articles, descriptions, translations, editing and content plans', 40, '{"skeleton":"Topic or source → draft → script check (size, structure, lengths) → decision, no — redo → editing","questions":["What is the text about and for whom?","What length?","What tone?","Is there a source text or a list?"],"tune":["topic and audience","length limits","tone and language"],"pitfalls":["Count the length with a script — the model writes shorter than promised","Check every item of the batch, not the average"]}', '{}'),
+  ('social', 'Social media and marketing', 'megaphone', 'Posts with images, ad creatives, series of publications', 50, '{"skeleton":"Brief or offer → texts and images in parallel → layout or assembly of publications → check","questions":["For which brand and social network?","Which rubrics or offer?","How many images?","Which service should make the images?"],"tune":["brand, rubrics, offer","number of images","creative size"],"pitfalls":["Make the images from the plan, not from the finished texts — the branches run in parallel","The headline goes on the image by a script with line breaks by width"]}', '{}'),
+  ('docs', 'Documents and reports', 'file', 'Reports, proposals, presentations and summaries from data', 60, '{"skeleton":"Brief or data → calculations and charts in parallel → text → HTML layout (A4 print) → check of required parts","questions":["Which document and for whom?","Which data or brief?","What must be in the document?"],"tune":["brief or data","sections","design"],"pitfalls":["Take the figures in the conclusions from the calculations file","Price, terms, contacts — only from the brief"]}', '{}'),
+  ('data', 'Data and APIs', 'database', 'Requests to services, exports, tables and summaries', 70, '{"skeleton":"Parameters or a table → requests or parsing (in parallel if there are several sources) → cleaning or a summary → check by the same script","questions":["Which data and from where?","What counts as a problem or as normal?","In what form do you need the result?"],"tune":["sources and parameters","cleaning rules","result format"],"pitfalls":["curl always with a timeout","Re-check with the same script as the first one"]}', '{}'),
+  ('audio', 'Audio and voice-over', 'music', 'Voice-over of a text, podcasts, music and sound tracks', 80, '{"skeleton":"Text → split into phrases → voice-over → ffmpeg joining or mixing (loudnorm) → duration check","questions":["Which text?","Which voice and language?","Do you need music?","Which service should voice it?"],"tune":["voice","pauses","volume and music"],"pitfalls":["All pieces to one sample rate before joining","The voice louder than the background by 10–15 dB"]}', '{}'),
+  ('code', 'Code and automation', 'code', 'Scripts, mini apps, checks and routine automation', 90, '{"skeleton":"Requirements → code and tests in parallel (tests from the requirements) → test run or syntax check → decision, no — fix the code","questions":["What should the program do?","Language and limits (no libraries?)","Which edge cases matter?"],"tune":["requirements","language","fix rounds"],"pitfalls":["Tests from the requirements, not from the code","Check JS syntax with node --check before the browser"]}', '{}'),
+  ('basics', 'Goblin basics', 'book', 'Learning schemes: a chain, a fork, a loop, parallel branches, a check', 100, '{"skeleton":"Learning schemes: a chain, a decision with branches and an any-merge, a loop with back and max_attempts, parallel branches with an all-merge","questions":["Which mechanism to show?","What should the blocks do?"],"tune":["decision conditions","round limits","topic"],"pitfalls":["After a decision — join any, after parallel branches — join all","The blocks of a loop have max_attempts"]}', '{}');
 
 CREATE TABLE "templates" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -529,6 +583,47 @@ BEGIN UPDATE "templates" SET "updated_at" = (strftime('%Y-%m-%d %H:%M:%f','now',
 
 -- ── Встроенный ИИ ──
 
+CREATE TABLE "ai_terminal_agents" (
+  "user_id" INTEGER NOT NULL,
+  "provider" TEXT COLLATE NOCASE NOT NULL DEFAULT 'builtin',
+  "name" TEXT COLLATE NOCASE DEFAULT NULL,
+  "scope" TEXT COLLATE NOCASE NOT NULL DEFAULT 'scheme',
+  "scope_project_id" INTEGER DEFAULT NULL,
+  "scope_parent_id" INTEGER DEFAULT NULL,
+  "scope_folder_id" INTEGER DEFAULT NULL,
+  "invite_scope" TEXT COLLATE NOCASE DEFAULT NULL,
+  "invite_project_id" INTEGER DEFAULT NULL,
+  "invite_parent_id" INTEGER DEFAULT NULL,
+  "invite_folder_id" INTEGER DEFAULT NULL,
+  "invite_hash" TEXT DEFAULT NULL,
+  "invite_expires_at" INTEGER DEFAULT NULL,
+  "token_hash" TEXT DEFAULT NULL,
+  "last_seen_at" INTEGER DEFAULT NULL,
+  PRIMARY KEY ("user_id"),
+  CONSTRAINT "fk_terminal_agent_user" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX "ai_terminal_agents__uq_terminal_agent_invite" ON "ai_terminal_agents" ("invite_hash");
+CREATE UNIQUE INDEX "ai_terminal_agents__uq_terminal_agent_token" ON "ai_terminal_agents" ("token_hash");
+
+
+CREATE TABLE "ai_terminal_tasks" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+  "user_id" INTEGER NOT NULL,
+  "kind" TEXT COLLATE NOCASE NOT NULL,
+  "project_id" INTEGER DEFAULT NULL,
+  "parent_id" INTEGER DEFAULT NULL,
+  "folder_id" INTEGER DEFAULT NULL,
+  "state" TEXT COLLATE NOCASE NOT NULL DEFAULT 'queued',
+  "messages" TEXT DEFAULT NULL CHECK ("messages" IS NULL OR json_valid("messages")),
+  "response" TEXT DEFAULT NULL CHECK ("response" IS NULL OR json_valid("response")),
+  "lease_hash" TEXT DEFAULT NULL,
+  "deadline_at" INTEGER NOT NULL,
+  CONSTRAINT "fk_terminal_task_agent" FOREIGN KEY ("user_id") REFERENCES "ai_terminal_agents" ("user_id") ON DELETE CASCADE
+);
+CREATE INDEX "ai_terminal_tasks__ix_terminal_task_queue" ON "ai_terminal_tasks" ("user_id","state","id");
+CREATE INDEX "ai_terminal_tasks__ix_terminal_task_expiry" ON "ai_terminal_tasks" ("deadline_at");
+
+
 CREATE TABLE "ai_chats" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
   "kind" TEXT NOT NULL CHECK ("kind" IN ('assistant','constructor')),
@@ -538,7 +633,7 @@ CREATE TABLE "ai_chats" (
   "user_id" INTEGER DEFAULT NULL,
   "token_id" INTEGER DEFAULT NULL,
   "requester" TEXT COLLATE NOCASE NOT NULL DEFAULT '',
-  "title" TEXT COLLATE NOCASE NOT NULL DEFAULT 'Новый чат',
+  "title" TEXT COLLATE NOCASE NOT NULL DEFAULT 'New chat',
   "goal" TEXT DEFAULT NULL,
   "state" TEXT COLLATE NOCASE NOT NULL DEFAULT 'open',
   "created_at" TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now','localtime')),
@@ -717,7 +812,7 @@ BEGIN UPDATE "visits" SET "last_seen" = (strftime('%Y-%m-%d %H:%M:%f','now','loc
 
 CREATE TABLE "documentation_pages" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT,
-  "lang" TEXT COLLATE NOCASE NOT NULL DEFAULT 'ru',
+  "lang" TEXT COLLATE NOCASE NOT NULL DEFAULT 'en',
   "parent_id" INTEGER DEFAULT NULL,
   "slug" TEXT NOT NULL,
   "title" TEXT COLLATE NOCASE NOT NULL,
@@ -824,6 +919,9 @@ INSERT INTO schema_migrations (name) VALUES
   ('031-run-steps-delivered.sql'),
   ('032-folders-drop-lead-seen.sql'),
   ('033-api-calls.sql'),
-  ('034-projects-files-server.sql');
+  ('034-projects-files-server.sql'),
+  ('035-graph.sql'),
+  ('036-run-graph.sql'),
+  ('037-ai-terminal-agent.sql');
 
 PRAGMA foreign_keys = ON;

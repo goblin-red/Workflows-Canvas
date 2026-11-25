@@ -2,6 +2,6 @@
 # инструкции, бэкапы и рабочие папки — по HTTP недоступно.
 RewriteEngine On
 # Адрес документации в рабочей папке ведёт на публичную страницу.
-RewriteRule ^md_backend/документация(?:/index\.php|/?)$ /goblin/documentation.php [R=302,L]
+RewriteRule ^md_backend/(?:docs|документация)(?:/index\.php|/?)$ documentation.php [R=302,L]
 RewriteRule ^$ public/ [L]
 RewriteRule ^(?!public/)(.*)$ public/$1 [L]

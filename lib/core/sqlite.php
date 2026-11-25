@@ -2,7 +2,7 @@
 /* SQLite вместо MySQL: соединение, недостающие функции MySQL и переводчик запросов.
    Отдаёт: sqliteOpen(), sqliteSql().
    Не делает: не знает таблиц и не правит смысл запросов — код пишет SQL как для MySQL,
-              здесь он только дотягивается до SQLite (план — md_backend/arch/github-install.md).
+              здесь он приводится к синтаксису SQLite.
 
    Функции MySQL (NOW, TIMESTAMPDIFF, GREATEST…) регистрируются в SQLite под теми же именами —
    запросы не меняются. Что функцией не сделать (INTERVAL, <=>, FOR UPDATE, IF, ON DUPLICATE KEY),
@@ -112,6 +112,6 @@ function sqliteSql(string $sql): string
         $sql = substr($sql, 0, $at) . 'ON CONFLICT DO UPDATE SET' . $tail;
     }
 
-    if (preg_match('~\bINTERVAL\b~i', $sql)) throw new RuntimeException('SQLite: не переведён INTERVAL — ' . $sql);
+    if (preg_match('~\bINTERVAL\b~i', $sql)) throw new RuntimeException('SQLite: unsupported INTERVAL expression — ' . $sql);
     return $sql;
 }

@@ -96,6 +96,15 @@ export const LOOKS = {
   },
 };
 
+export const SKINS = {
+  ...LOOKS,
+  graph: {
+    icon: '<rect x="3" y="4" width="7" height="6" rx="1"/><rect x="14" y="14" width="7" height="6" rx="1"/><path d="M6.5 10v4a3 3 0 0 0 3 3H14"/>',
+    title: t('editor.looks.graph'),
+    about: t('editor.looks.graph_about'),
+  },
+};
+
 const STORE = 'goblin-look';
 
 /** Сенсорное устройство — телефон или планшет: палец, а не мышь. */
@@ -104,6 +113,8 @@ export function isTouchDevice() {
 }
 
 export function currentLook() {
+  const active = document.body.dataset.look;
+  if (Object.hasOwn(LOOKS, active)) return active;
   try {
     const saved = localStorage.getItem(STORE);
     if (saved && LOOKS[saved]) return saved;
@@ -116,9 +127,14 @@ export function currentLook() {
 }
 
 export function setLook(name) {
-  if (!LOOKS[name]) return;
+  if (!Object.hasOwn(LOOKS, name)) return;
   state.look = name;
   document.body.dataset.look = name;
+  const address = new URL(location.href);
+  if (address.searchParams.get('visual') === '1' && address.searchParams.get('skin') !== name) {
+    address.searchParams.set('skin', name);
+    history.replaceState(null, '', address);
+  }
   try { localStorage.setItem(STORE, name); } catch {}
   emit('look', name);
   emit('steps');   // перерисовать карточки целиком

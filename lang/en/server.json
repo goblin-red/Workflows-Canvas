@@ -55,6 +55,7 @@
  "server.batch.op_unnamed": "A batch contains an operation without a name",
  "server.batch.project_changed": "The project was changed meanwhile: reload the scheme",
  "server.batch.folder_changed": "The folder was changed meanwhile: reload it",
+ "server.batch.classic_schema_retired": "This scheme now uses the new editor. Reopen the project to make changes.",
  "server.batch.bad_ref": "{what}: unclear reference",
  "server.api.body_not_json": "The request body is not JSON",
  "server.api.foreign_origin": "A write from a foreign page was refused: Goblin accepts writes only from its own pages.",

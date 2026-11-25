@@ -16,11 +16,11 @@ declare(strict_types=1);
 function aiLaunch(int $jobId): void
 {
     $php = (string) (config()['php_cli'] ?? '');
-    if ($php !== '' && is_file($php) && aiExecAllowed()) {
-        $script = dirname(__DIR__, 2) . '/bin/server.php';
+    $script = dirname(__DIR__, 2) . '/bin/server.php';
+    if ($php !== '' && is_executable($php) && is_readable($script) && aiExecAllowed()) {
         $command = escapeshellarg($php) . ' ' . escapeshellarg($script) . ' ai-job ' . (int) $jobId . ' > /dev/null 2>&1 &';
-        @exec($command);
-        return;
+        @exec($command, $discarded, $status);
+        if ($status === 0) return;
     }
     register_shutdown_function(static function () use ($jobId): void {
         aiAfterReply();
@@ -53,6 +53,10 @@ function aiAfterReply(): void
  */
 function aiJobContext(array $context): string
 {
+    // Фоновый процесс получает решение человека при отправке, а не владельца чата или новый выбор.
+    unset($context['terminalAgentUser'], $context['terminalAgentScope']);
+    if (($user = aiSessionAgentUser()) !== null) $context['terminalAgentUser'] = $user;
+    else unset($context['userMessageId']);
     return json_encode($context + ['lang' => lang()], JSON_UNESCAPED_UNICODE);
 }
 
@@ -73,9 +77,16 @@ function aiJobRun(int $jobId): void
     langAgents(in_array($lang, LANGS, true) ? $lang : (string) ($project['lang'] ?? 'ru'));
     $asker = ($job['user_id'] ?? $job['chat_user']) ? (int) ($job['user_id'] ?: $job['chat_user']) : null;
     aiAccessUse($asker);   // доступ к модели — того, кто спросил
+    $terminalUser = (int) ($context['terminalAgentUser'] ?? 0);
+    $GLOBALS['goblin_terminal_agent_user'] = $terminalUser > 0 && $terminalUser === (int) $job['user_id']
+        ? $terminalUser : null;
     apiCallAbout($job['project_id'] ? (int) $job['project_id'] : null, (string) $job['kind']);   // журнал вызовов
     aiJobLang($context);
     $folderId = $context['folder'] ?? null;
+    $GLOBALS['goblin_terminal_agent_target'] = [
+        'projectId' => (int) $job['project_id'],
+        'folderId' => !empty($context['whole']) || !$folderId ? null : (int) $folderId,
+    ];
 
     // Конструктор — свой ход: опрос карточками и черновик (ai/build.php).
     if ($job['chat_kind'] === 'constructor') {
@@ -84,19 +95,19 @@ function aiJobRun(int $jobId): void
     }
 
     try {
-        $history = dbAll('SELECT role, body FROM ai_messages WHERE chat_id = ? ORDER BY id DESC LIMIT 12', [$job['chat_id']]);
-        $history = array_reverse($history);
+        $history = aiAssistantHistory($job, $context);
 
         $messages = [[
             'role' => 'system',
             'content' => aiRules('assistant') . "\n\n" . aiSchemaHint()
-                . ta('agents.ai.scheme_now', ['scheme' => json_encode(aiContext($project, $folderId, $context), JSON_UNESCAPED_UNICODE)]),
+                . ta('agents.ai.scheme_now', ['scheme' => json_encode(aiAssistantContext($project, $folderId, $context), JSON_UNESCAPED_UNICODE)]),
         ]];
         foreach ($history as $item) {
             $messages[] = ['role' => $item['role'] === 'user' ? 'user' : 'assistant', 'content' => (string) $item['body']];
         }
 
         $answer = aiAsk($messages);
+        $agentScope = $answer['agentScope'] ?? null;
         $usage = [$answer['model'], $answer['usage']['prompt'], $answer['usage']['completion'],
                   $answer['usage']['total'], $answer['usage']['cached'], $answer['usage']['known'] ? 1 : 0];
         /* Ход мысли для человека: сначала то, что модель думала про себя,
@@ -117,7 +128,7 @@ function aiJobRun(int $jobId): void
            Сервер отказал или после правок прогон встанет (новая помеха предпроверки) —
            модель получает причину и исправляется один раз. Отказ остался — не предлагаем
            то, что не применится; осталась помеха — предлагаем, но с предупреждением. */
-        $check = aiDryRun($project, $compiled['ops'], $folderId ? (int) $folderId : null);
+        $check = aiAssistantCheck($project, $compiled['ops'], $folderId ? (int) $folderId : null, $agentScope);
         if ($compiled['ops']) {
             $think[] = ta('agents.ai.think_check', ['n' => count($compiled['ops']),
                 'result' => $check['error'] !== null ? ta('agents.ai.check_refused', ['error' => $check['error']])
@@ -137,10 +148,11 @@ function aiJobRun(int $jobId): void
             $usage[3] += $retry['usage']['total'];
             $usage[4] += $retry['usage']['cached'];
             if (is_array($retry['data'])) {
+                if (($retry['agentScope'] ?? null) === 'scheme') $agentScope = 'scheme';
                 $data = $retry['data'];
                 $say = (string) ($data['say'] ?? $say);
                 $compiled = aiCompile((array) ($data['changes'] ?? []), (int) ($folderId ?: 0));
-                $check = aiDryRun($project, $compiled['ops'], $folderId ? (int) $folderId : null);
+                $check = aiAssistantCheck($project, $compiled['ops'], $folderId ? (int) $folderId : null, $agentScope);
             }
             if ($check['error'] !== null) {
                 $say = ($say !== '' ? $say . "\n\n" : '') . ta('agents.ai.say_refused', ['error' => $check['error']]);
@@ -155,12 +167,13 @@ function aiJobRun(int $jobId): void
         if ($compiled['dropped']) $say .= ta('agents.ai.say_dropped', ['list' => implode('; ', $compiled['dropped'])]);
 
         // Опасное (удаления, правка ТЗ и материалов) всегда ждёт «Применить»; прочее — по настройке проекта.
-        $needsOk = $compiled['ops'] && (aiSensitive($compiled['ops']) || (int) $project['ai_confirm'] === 1);
+        $needsOk = $compiled['ops'] && ($agentScope !== null || aiSensitive($compiled['ops']) || (int) $project['ai_confirm'] === 1);
         $preview = aiPreview($compiled['ops'], (int) $project['id']);
 
         /* Итог — одной транзакцией: замок проекта, затем строка задания. «Стоп» успел раньше —
            только расход: ни ответа, ни правок схемы. Иначе ответ, правки и состояние — вместе. */
-        engineLocked((int) $project['id'], static function () use ($job, $jobId, $project, $compiled, $data, $say, $think, $usage, $needsOk, $preview, $asker): void {
+        if ($agentScope !== null) $context['terminalAgentScope'] = $agentScope;
+        engineLocked((int) $project['id'], static function () use ($job, $jobId, $project, $compiled, $data, $say, $think, $usage, $needsOk, $preview, $asker, $context): void {
             if (!aiJobAlive($jobId, $usage, true)) return;
             dbRun('INSERT INTO ai_messages (chat_id, role, body, think) VALUES (?,?,?,?)',
                 [$job['chat_id'], 'assistant', $say . ($needsOk ? ta('agents.ai.press_apply') : ''), implode("\n\n", $think) ?: null]);
@@ -180,7 +193,7 @@ function aiJobRun(int $jobId): void
                     ["\n" . ($needsOk ? ta('agents.ai.think_wait') : ta('agents.ai.think_now')), $messageId]);
             }
             dbRun(
-                'UPDATE ai_jobs SET state = ?, response = ?, ops = ?, preview = ?, message_id = ?, model = ?,
+                'UPDATE ai_jobs SET state = ?, response = ?, ops = ?, preview = ?, context = ?, message_id = ?, model = ?,
                         tokens_prompt = ?, tokens_completion = ?, tokens_total = ?, tokens_cached = ?, usage_known = ?, finished_at = NOW(3)
                   WHERE id = ?',
                 [
@@ -188,6 +201,7 @@ function aiJobRun(int $jobId): void
                     json_encode($data, JSON_UNESCAPED_UNICODE),
                     json_encode($compiled['ops'], JSON_UNESCAPED_UNICODE),
                     json_encode($preview, JSON_UNESCAPED_UNICODE),
+                    json_encode($context, JSON_UNESCAPED_UNICODE),
                     $messageId, ...$usage, $jobId,
                 ]
             );
@@ -198,6 +212,42 @@ function aiJobRun(int $jobId): void
         dbRun("UPDATE ai_jobs SET state = 'failed', error = ?, finished_at = NOW(3) WHERE id = ? AND state = 'running'",
             [mb_substr($error->getMessage(), 0, 500), $jobId]);
     }
+}
+
+/** Реплики терминала связываются с той же схемой, режимом обзора и учётной записью. */
+function aiAssistantHistory(array $job, array $context): array
+{
+    $user = aiSelectedAgentUser();
+    if ($user === null) {
+        return array_reverse(dbAll('SELECT role, body FROM ai_messages WHERE chat_id = ? ORDER BY id DESC LIMIT 12', [$job['chat_id']]));
+    }
+    $ids = [(int) ($context['userMessageId'] ?? 0)];
+    foreach (dbAll('SELECT context, message_id FROM ai_jobs
+                    WHERE chat_id = ? AND user_id = ? AND message_id IS NOT NULL ORDER BY id DESC LIMIT 5',
+        [$job['chat_id'], $user]) as $one) {
+        $previous = json_decode((string) $one['context'], true) ?: [];
+        if ((int) ($previous['terminalAgentUser'] ?? 0) !== $user
+            || ($previous['folder'] ?? null) !== ($context['folder'] ?? null)
+            || !empty($previous['whole']) !== !empty($context['whole'])) continue;
+        $ids[] = (int) ($previous['userMessageId'] ?? 0);
+        $ids[] = (int) $one['message_id'];
+    }
+    $marks = implode(',', array_fill(0, count($ids), '?'));
+    return dbAll("SELECT role, body FROM ai_messages WHERE chat_id = ? AND id IN ($marks) ORDER BY id",
+        [$job['chat_id'], ...$ids]);
+}
+
+function aiAssistantCheck(array $project, array $ops, ?int $folder, ?string $agentScope): array
+{
+    if ($agentScope === 'scheme' && $ops) {
+        try {
+            if ($folder === null) throw new ApiError('Select the connected scheme', 'scope');
+            aiAgentGuardLegacyOps((int) $project['id'], $folder, $ops);
+        } catch (ApiError $error) {
+            return ['error' => $error->getMessage(), 'new' => []];
+        }
+    }
+    return aiDryRun($project, $ops, $folder);
 }
 
 /**

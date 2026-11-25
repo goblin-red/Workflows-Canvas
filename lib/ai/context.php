@@ -51,6 +51,23 @@ function aiContext(array $project, ?int $folderId, array $extra = []): array
     return $out;
 }
 
+/** Терминалу отдаём данные запрошенной схемы без ключа проекта и соседних папок. */
+function aiAssistantContext(array $project, ?int $folderId, array $extra = []): array
+{
+    $out = aiContext($project, $folderId, $extra);
+    if (aiSelectedAgentUser() === null) return $out;
+    unset($out['project']['key'], $out['workDir']);
+    if ($folderId === null) return $out;
+    $folder = folderRow($folderId, (int) $project['id']);
+    $out['folders'] = [['id' => $folderId, 'name' => $folder['name']]];
+    unset($out['agents']);
+    foreach ($out['scheme'] as &$element) {
+        unset($element['target'], $element['targetFolder']);
+    }
+    unset($element);
+    return $out;
+}
+
 /**
  * Последний прогон папки — для разбора: где встал, что сорвалось, где долго.
  * Шаг: номер, круг, состояние, исполнитель, секунды, ответ и ошибка (коротко).

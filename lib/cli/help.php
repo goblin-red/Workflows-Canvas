@@ -6,136 +6,38 @@
 declare(strict_types=1);
 
 const HINTS = [
-    'job' => "goblin job add --provider krea --tool generate_image --model <модель> [--request файл]\n"
-           . "goblin job set <REF> --id <id сервиса> --state sent|done|failed|rejected [--error «…»]\n"
-           . "goblin job list   — свои заявки по этому шагу: ссылка, состояние, номер задания\n"
-           . "Ссылка (j1, j2, …) сквозная по прогону, а не по шагу.\n"
-           . "Заявка заводится ДО обращения к сервису и закрывается сразу после ответа.\n"
-           . 'Состояния «error» нет; отменить заведённую заявку нельзя.',
-
-    'submit' => "goblin submit --result «одна строка до 200 знаков» [файл=выход …] [--next]\n"
-              . "Пути к файлам можно писать от рабочей папки прогона.\n"
-              . "--next сразу берёт следующий шаг той же GOBLIN_WORKER_SESSION: два запроса подряд.\n"
-              . 'Подробности — не в результат, а в веху: goblin note «…» --stage working.',
-
-    'note' => 'goblin note «что происходит» --stage working|checking|waiting',
-    'fail' => 'goblin fail --reason «почему не вышло» [--blocker]',
-    'task' => "goblin task [--raw] [--peek]   — взять задание; --peek только посмотреть, не берясь\n"
-            . 'Engine 2 long agent использует только exact run/step из кэша той же worker session.',
-
-    'work' => "goblin work [--id r54] [--wait 25] [--raw] [--session ID]\n"
-            . "Canonical route: engine 2 использует step.take, engine 1 — старый step.mine/get.\n"
-            . "Для engine 2 нужны GOBLIN_AGENT и постоянная GOBLIN_WORKER_SESSION.\n"
-            . "task/note/submit/fail не выбирают latest: потерян exact cache — снова goblin work.\n"
-            . "Код 3 — работы пока нет; код 0 — подтверждённо прогонов нет; код 2 — доступ потерян.\n"
-            . 'Явный старый путь: goblin work1.',
-
-    'work1' => "goblin work1 [--wait 60]   — legacy engine 1 через step.mine/get\n"
-             . 'Нужен пропуск агента: export GOBLIN_AGENT=gba_…',
-
-    'watch' => "goblin watch [--id 49 | --folder 8545] [--every 5] [--timeout 600] [--accept 90] [--idle 120] [--log путь]\n"
-             . "  Сторож прогона: молчит, пока всё движется, и завершается, когда нужен leader.\n"
-             . "  Коды выхода: 0 конец прогона · 3 ждёт приёмки · 4 шаг завис · 5 сбой шага\n"
-             . "               6 прогон стоит без открытых шагов · 2 сервер не отвечает.\n"
-             . '  Запускать фоном: его завершение и есть сигнал «проснись».',
-
-    'drive' => "goblin drive [--id r54] [--timeout 600]\n"
-             . "Canonical route: engine 2 ведёт серверный run.advance, engine 1 — старый круг.\n"
-             . "Для engine 2 нужен точный прогон через GOBLIN_RUN или --id.\n"
-             . "Коды: 0 пройден · 2 сервер недоступен · 3 нужен человек · 4 worker молчит\n"
-             . "      5 остановлен · 6 тупик. Явный старый путь: goblin drive1.\n"
-             . 'При jev=off внешних вызовов Jev нет.',
-
-    'drive1' => "goblin drive1 [--id r28] [--rounds N] [--accept-clean] [--timeout 900] [--no-finish]\n"
-             . "Круг leader без рук: открыть готовые шаги, дождаться сдачи, принять, закрыть прогон.\n"
-             . "Без --id и без пропуска ведёт все живые прогоны проекта — один процесс на любое их число.\n"
-             . "--accept-clean принимает шаг сам, если сервер не сказал ни слова предупреждения.\n"
-             . "Ромб с условием в свойстве `cond` (например `a > 5`) круг решает сам:\n"
-             . "числа берутся из результата шага, давшего жетон. Без условия — зовёт leader.\n"
-             . "Пройденный прогон закрывается сам; --no-finish это отключает.\n"
-             . "Перед приёмкой круг показывает сдачу сигнальщику Джеву: если тот видит\n"
-             . "противоречие заданию или входам выше порога, шаг не принимается сам —\n"
-             . "круг зовёт leader. Порог задаётся --jev-at 0.8, --no-jev выключает.\n"
-             . "Всё, что круг делает, ложится строкой в <рабочая папка>/service/прогон.log.",
-
-    'launch' => "goblin launch <номер> [--mode cli|subagent] [--wait] [--cmd «своя команда»] [--force]\n"
-              . "Блок уже выдан сервером — берётся пропуск той же попытки; шаг в работе у worker — отказ без --force.\n"
-              . 'Пакет задания пишется в служебную папку прогона storage/runs/<id прогона>/; путь команда печатает.',
-
-    'prepare' => "goblin prepare --folder 8547 [--files]\n"
-               . "Подготовить папку к новому прогону: снять с холста статусы прошлых прогонов\n"
-               . "и обложки, которые поставил прогон (оформление схемы вернётся само).\n"
-               . "--files ещё и чистит рабочую папку: out/ и service/steps.\n"
-               . "Входы — pic/, in.txt и всё, что лежало до прогона, — не трогаются.",
-
-    'log' => "goblin log [--id r41] [--step 26] [--kind submit] [--full] [--event 42]\n"
-           . "Лента прогона: что происходило, по строке на событие.\n"
-           . "Свёрнуто видны заголовки; --full раскрывает тела, --event N — одно событие целиком.\n"
-           . "Виды: start, open, package, launch, task, note, job, job-done, message, submit,\n"
-           . "judge, accept, return, fail, decide, pass, console, drive, watch, finish.",
-
-    'say' => "goblin say «текст» [--to ОПУС-3] [--no 26]\n"
-           . "Записать сообщение в ленту прогона: переписка leader с worker\n"
-           . "идёт мимо сервера, и без этой команды её в журнале не видно.",
-
-    'jev' => "goblin jev <номер> [--raw]   — что скажет сигнальщик о сдаче или о ромбе\n"
-           . "Ничего не меняет: печатает противоречие в процентах и своё мнение.\n"
-           . "Ключ — личный владельца проекта (кабинет) или общий установки (админка); без ключа или при jev=off команда в сеть не идёт.",
-
-    // ── Утилита движка (md_backend/ru/progon.md) ──
-    'state' => "goblin state [--id r54] [--full]\n"
-             . "Где прогон и чего ждёт: вариант, версия, открытые шаги, что готово.\n"
-             . '--full добавляет все попытки.',
-
-    'go' => "goblin go [шаг] [--why «…»]          — принять сданное и вести дальше\n"
-          . "goblin go [шаг] --return «что не так»   — вернуть на доработку\n"
-          . "goblin go 36 yes|no [--why «…»]      — решить ромб\n"
-          . "Шаг называют номером блока (36) или адресом попытки (36.2) — понимает оба.\n"
-          . "После твоего решения команда НЕ выходит: она ведёт прогон дальше, как drive,\n"
-          . "и возвращается, только когда снова нужен ты, прогон закрылся или вышел срок\n"
-          . "(--timeout, по умолчанию 600 с). Новую сдачу печатает целиком: ТЗ, вход,\n"
-          . "результат, итог проверок.\n"
-          . 'Коды: 0 сдача показана или прогон пройден · 3 нужен человек · 4 worker молчит · 5 остановлен · 6 тупик.',
-
-    'drive2' => "goblin drive2 [--id r54] [--timeout 600]   — явный alias engine 2\n"
-              . "Вести прогон до конца или до человека. Правил в утилите нет: ход делает сервер\n"
-              . "(run.advance), утилита печатает сделанное и замечает молчание worker.\n"
-              . 'Коды: 0 пройден · 2 сервер недоступен · 3 нужен человек · 4 worker молчит · 5 остановлен · 6 тупик.',
-
-    'pace' => "goblin pace <секунды>   — пауза показа на ходу; 0 отпускает прогон на полную скорость",
-
-    'history' => "goblin history [--no 35] [--all]   — что уже принято в прогоне\n"
-               . 'Пакет задания историю больше не носит: смотреть её сюда.',
-
-    'work' => "goblin work [--id rN] [--wait 25] [--brief] [--raw]   — взять свой шаг\n"
-            . "--brief — только шапка: вход, образец ответа, причина прошлого возврата.\n"
-            . "Полное ТЗ тогда не печатается; сам пакет лежит в storage/runs/<прогон>/steps/.\n"
-            . 'Нужны GOBLIN_AGENT и GOBLIN_WORKER_SESSION; пропуск шага утилита хранит сама.',
-
-    'report' => "goblin report [--id rN]   — итог прогона: принято, время шагов, подозрительно быстрое\n"
-              . "Шаг короче трёх секунд помечается: работы там могло и не быть.\n"
-              . 'Пройденный прогон читается ключом проекта — пропуск leader уже погас.',
-
-    'work2' => "goblin work2 [--wait 25] [--raw] [--session ID]   — взять свой шаг (step.take)\n"
-             . "Нужны GOBLIN_AGENT=gba_… и постоянный GOBLIN_WORKER_SESSION для этого процесса.\n"
-             . "Пропуск шага хранится в файле 0600, отдельном для URL, проекта, прогона,\n"
-             . "агента и worker session; submit, note, job и fail находят его сами.\n"
-             . "Другая session не может отобрать уже работающий шаг.\n"
-             . "Работы пока нет — код 3; подтверждённо прогонов нет — код 0.\n"
-             . 'Потерян доступ/прогон — код 2 и неизвестный исход, это не успешное окончание.',
-
-    'reset'  => "goblin reset <номер>   — блок снова новый\n"
-              . "goblin reset --all   — весь прогон заново; legacy engine 1 переходит на engine 2",
-    'accept' => 'goblin accept <номер> [--why «…»]',
-    'return' => 'goblin return <номер> --why «что не так»',
-    'decide' => 'goblin decide <номер> yes|no --why «почему»',
-    'token'  => "goblin token <id агента>   — долгий пропуск: worker сам берёт свои шаги\n"
-              . 'Команда печатает export для GOBLIN_AGENT и постоянной GOBLIN_WORKER_SESSION.',
+    'job' => "goblin job add --provider PROVIDER --tool TOOL --model MODEL [--request FILE]\nRecord a job before calling a service. Use goblin job set REF --id ID --state done after it succeeds.",
+    'submit' => "goblin submit --result \"RESULT\" [FILE=OUTPUT ...] [--next]\nSubmit the result and optionally attach files by output name.",
+    'note' => "goblin note \"MESSAGE\" --stage working|checking|waiting",
+    'fail' => "goblin fail --reason \"REASON\" [--blocker]",
+    'task' => "goblin task [--raw] [--peek]\nPeek reads the task without claiming it.",
+    'work' => "goblin work [--id RUN] [--wait 25] [--brief] [--raw] [--session ID]\nWait for an available step and claim it.",
+    'work1' => "goblin work1 [--wait 60]\nClaim work through the legacy engine.",
+    'watch' => "goblin watch [--id RUN | --folder ID] [--every 5] [--timeout 600] [--accept 90] [--idle 120] [--log PATH]\nObserve the current run.",
+    'drive' => "goblin drive [--id RUN] [--timeout 600]\nAdvance the run until it finishes or needs a decision.",
+    'drive1' => "goblin drive1 [--id RUN] [--rounds N] [--accept-clean] [--timeout 900] [--no-finish]\nDrive a legacy run.",
+    'launch' => "goblin launch STEP [--mode cli|subagent] [--wait] [--cmd COMMAND] [--force]\nPrepare and start the worker for the selected step.",
+    'prepare' => "goblin prepare --folder ID [--files]\nClear old display states and covers. The --files option also clears run output and step service files.",
+    'log' => "goblin log [--id RUN] [--step STEP] [--kind KIND] [--full] [--event ID]\nRead run events. Use --full for event bodies.",
+    'say' => "goblin say \"MESSAGE\" [--to AGENT] [--no STEP]\nWrite a message to the run timeline.",
+    'jev' => "goblin jev STEP [--raw]\nShow Jev’s configured assessment without changing the run.",
+    'state' => "goblin state [--id RUN] [--full]\nShow the current state, open work and ready steps. Use --full for previous attempts.",
+    'go' => "goblin go [STEP] [--why REASON]\ngoblin go STEP --return REASON\ngoblin go STEP yes|no [--why REASON]\nAccept, return or choose a branch, then continue the run.",
+    'drive2' => "goblin drive2 [--id RUN] [--timeout 600]\nDrive a run with engine 2.",
+    'pace' => "goblin pace SECONDS\nSet the display pause. Zero removes it.",
+    'history' => "goblin history [--no STEP] [--all]\nShow accepted work.",
+    'report' => "goblin report [--id RUN]\nShow completion, accepted work and elapsed times.",
+    'work2' => "goblin work2 [--wait 25] [--raw] [--session ID]\nClaim work with step.take.",
+    'reset' => "goblin reset STEP\nReset the work block for a new attempt.",
+    'accept' => "goblin accept STEP [--why REASON]",
+    'return' => "goblin return STEP --why REASON",
+    'decide' => "goblin decide STEP yes|no --why REASON",
+    'token' => "goblin token AGENT_ID\nIssue a worker pass for claiming steps.",
 ];
 
 function hint(string $name): string
 {
-    return HINTS[$name] ?? 'Подсказки по этой команде нет. Общая справка: goblin --help';
+    return HINTS[$name] ?? 'No help is available for this command. Run goblin --help.';
 }
 
 /** Полная инструкция с сервера: `goblin help lead` или `goblin help worker`. */
@@ -151,13 +53,13 @@ function cmdHelp(array $f): int
             say(hint($which));
             return 0;
         }
-        die_("нет инструкции «{$which}». Есть: goblin help lead|worker|deepseek,"
-            . " а по команде — goblin <команда> --help");
+        die_("No instructions for {$which}. Use goblin help lead|worker|deepseek,"
+            . " or goblin <command> --help for a command.");
     }
 
     $where = cfg('url') . '?' . http_build_query(['op' => 'docs.get', 'file' => $which, 'project' => cfg('project')]);
     $text  = @file_get_contents($where);
-    if ($text === false) die_('инструкция не читается: ' . $where);
+    if ($text === false) die_('Could not read instructions: ' . $where);
     say($text);
     return 0;
 }

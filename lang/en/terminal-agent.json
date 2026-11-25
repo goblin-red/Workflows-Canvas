@@ -1,0 +1,18 @@
+{
+ "server.terminal_agent.not_installed": "Agent connection requires a database update.",
+ "server.terminal_agent.bad_provider": "Choose the built-in assistant or the agent.",
+ "server.terminal_agent.bad_scope": "Choose one scheme or the whole account.",
+ "server.terminal_agent.bad_target": "Select a scheme for this agent connection.",
+ "server.terminal_agent.target_forbidden": "The agent does not have access to this scheme.",
+ "server.terminal_agent.disconnected": "Connect the agent first.",
+ "server.terminal_agent.bad_name": "Enter an agent name up to 80 characters.",
+ "server.terminal_agent.bad_invite": "The connection code is invalid or expired.",
+ "server.terminal_agent.bad_token": "The agent connection is invalid.",
+ "server.terminal_agent.bad_wait": "The wait must be between 0 and 20 seconds.",
+ "server.terminal_agent.bad_finish": "The agent reply does not match the task.",
+ "server.terminal_agent.too_large": "The agent message is too long.",
+ "server.terminal_agent.stale_task": "This task is no longer available.",
+ "server.terminal_agent.offline": "The agent is offline. Check whether it is running in the terminal.",
+ "server.terminal_agent.failed": "The agent could not complete the task.",
+ "server.terminal_agent.timeout": "The agent did not reply in time."
+}

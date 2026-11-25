@@ -1,21 +1,10 @@
 <?php
-/* Командная строка сервера: миграции, бэкап, карта кода, уборка, задания ИИ.
-   Запускается только из терминала.
-
-   Использование:
-     php bin/server.php install              — установка вопросами в Терминале (то же, что install.php)
-     php bin/server.php serve [--port=8080]  — встроенный сервер PHP: http://localhost:8080
-     php bin/server.php release [--to=папка]  — папка релиза для GitHub (по умолчанию ../goblin-release)
-     php bin/server.php migrate [--apply]
-     php bin/server.php schema-sqlite        — sql/schema.sqlite.sql из sql/schema.sql
-     php bin/server.php catalog-export       — sql/catalog.json: встроенный каталог схем для новых установок
-     php bin/server.php backup [метка]
-     php bin/server.php files-gc [--apply]
-     php bin/server.php map
-     php bin/server.php ai-job ID
-
-   Разовый перенос из Гоблина v1 (команды v1-*) выполнен и убран: его код лежит
-   в archive/lib-transfer/. */
+/* Goblin Canvas server commands. Run from the installation directory.
+   php bin/server.php install              Install the application.
+   php bin/server.php serve --port=8080    Serve it on localhost.
+   php bin/server.php migrate [--apply]    Inspect or apply pending migrations.
+   php bin/server.php release --to=PATH   Build a distribution in a separate folder.
+   See README.md for requirements and installation instructions. */
 
 declare(strict_types=1);
 
@@ -42,7 +31,7 @@ switch ($command) {
     case 'release':   cmdRelease($root, (string) ($flags['to'] ?? dirname($root) . '/goblin-release')); break;
     case 'migrate':   cmdMigrate($root, isset($flags['apply'])); break;
     case 'schema-sqlite': cmdSchemaSqlite(); break;
-    case 'catalog-export': file_put_contents(SCHEMA_DIR . '/catalog.json', schemaCatalog()); echo "записано: sql/catalog.json\n"; break;
+    case 'catalog-export': file_put_contents(SCHEMA_DIR . '/catalog.json', schemaCatalog()); echo "Written: sql/catalog.json\n"; break;
     case 'backup':    cmdBackup($root, $plain[0] ?? 'manual'); break;
     case 'files-gc':  cmdFilesGc(isset($flags['apply'])); break;
     case 'map':       cmdMap($root); break;
@@ -65,11 +54,9 @@ function cmdInstall(): void
         if ($hidden) { shell_exec('stty echo 2>/dev/null'); echo PHP_EOL; }
         return $answer !== '' ? $answer : $or;
     };
-    $lang = $ask('Язык / language (ru, en)', 'ru') === 'en' ? 'en' : 'ru';
-    $_COOKIE['goblin_lang'] = $lang;
     foreach (installChecks() as $c) echo $c['ok'] ? '  ✓ ' : '  ✗ ', $c['what'], $c['say'] !== '' ? ' — ' . $c['say'] : '', PHP_EOL;
 
-    $in = ['lang' => $lang];
+    $in = [];
     $in['where'] = $ask(t('install.where') . ' (local, web)', 'local') === 'web' ? 'web' : 'local';
     if ($in['where'] === 'local') $in['serve'] = $ask(t('install.serve_php') . ' / XAMPP (php, apache)', 'php') === 'apache' ? 'apache' : 'php';
     $in['driver'] = $ask(t('install.db') . ' (sqlite, mysql)', $in['where'] === 'web' ? 'mysql' : 'sqlite') === 'mysql' ? 'mysql' : 'sqlite';
@@ -81,7 +68,7 @@ function cmdInstall(): void
         $in['create'] = $ask(t('install.create') . ' (y, n)', 'y') !== 'n';
     }
     $in['admin_login'] = $ask(t('install.admin_login'), 'admin');
-    $in['admin_pass'] = $ask(t('install.admin_pass'), '', true);
+    $in['admin_pass'] = $ask(t('install.admin_pass'), $in['admin_login'] === 'admin' ? 'admin' : '', true);
     echo t('install.keys_hint'), PHP_EOL;
     foreach (['ai_key_deepseek' => 'DeepSeek', 'ai_key_openrouter' => 'OpenRouter', 'voice_api_key' => t('install.key_voice'), 'jev_api_key' => 'Jev'] as $key => $label) {
         $in[$key] = $ask($label, '', true);
@@ -103,7 +90,7 @@ function cmdInstall(): void
 function cmdServe(string $root, int $port): void
 {
     chdir($root);
-    echo "Гоблин: http://localhost:$port  (остановить — Ctrl+C)", PHP_EOL;
+    echo "Goblin Canvas: http://localhost:$port (press Ctrl+C to stop)", PHP_EOL;
     passthru('PHP_CLI_SERVER_WORKERS=4 ' . escapeshellarg(PHP_BINARY) . ' -S localhost:' . $port . ' -t ' . escapeshellarg($root . '/public')
         . ' -d upload_max_filesize=100M -d post_max_size=105M ' . escapeshellarg($root . '/bin/router.php'));
 }
@@ -112,14 +99,14 @@ function cmdServe(string $root, int $port): void
 function cmdRelease(string $root, string $dest): void
 {
     require_once $root . '/lib/install/release.php';
-    if (realpath($dest) === realpath($root)) { echo "релиз не собирают в рабочий Гоблин\n"; exit(1); }
+    if (realpath($dest) === realpath($root)) { echo "Choose a different directory for the release\n"; exit(1); }
     try {
         $done = releaseBuild($dest);
     } catch (Throwable $e) {
         echo $e->getMessage(), PHP_EOL;
         exit(1);
     }
-    printf("релиз: %s — файлов %d, %.1f МБ\n", $dest, $done['files'], $done['bytes'] / 1048576);
+    printf("Release: %s — %d files, %.1f MB\n", $dest, $done['files'], $done['bytes'] / 1048576);
 }
 
 /* ── Миграции ─────────────────────────────────────────────────── */
@@ -127,14 +114,14 @@ function cmdRelease(string $root, string $dest): void
 function cmdMigrate(string $root, bool $apply): void
 {
     $waiting = schemaMigrations()['waiting'];
-    if (!$waiting) { echo "все миграции применены\n"; return; }
+    if (!$waiting) { echo "All migrations are applied\n"; return; }
 
     foreach ($waiting as $name) {
-        if (!$apply) { echo "ждёт: $name\n"; continue; }
+        if (!$apply) { echo "Pending: $name\n"; continue; }
         schemaMigrate($name);
-        echo "применена: $name\n";
+        echo "Applied: $name\n";
     }
-    if (!$apply) echo "это только список. Повторите с --apply\n";
+    if (!$apply) echo "No changes applied. Run again with --apply to migrate.\n";
 }
 
 /** Схема SQLite из схемы MySQL — после правки sql/schema.sql (lib/core/schema.php). */
@@ -142,7 +129,7 @@ function cmdSchemaSqlite(): void
 {
     $file = SCHEMA_DIR . '/schema.sqlite.sql';
     file_put_contents($file, schemaSqlite((string) file_get_contents(SCHEMA_DIR . '/schema.sql')));
-    echo "записано: sql/schema.sqlite.sql\n";
+    echo "Written: sql/schema.sqlite.sql\n";
 }
 
 /* ── Бэкап ────────────────────────────────────────────────────── */
@@ -151,7 +138,7 @@ function cmdBackup(string $root, string $label): void
 {
     $label = preg_replace('/[^\w\-а-яА-Я]/u', '-', $label) ?: 'manual';
     $dest = $root . '/backup/' . date('Y-m-d_H-i') . '_' . $label;
-    if (is_dir($dest)) { echo "такая папка уже есть: $dest\n"; exit(1); }
+    if (is_dir($dest)) { echo "Directory already exists: $dest\n"; exit(1); }
     mkdir($dest . '/db', 0775, true);
 
     // Код, инструкции, схема и public/workfiles. Ключи и пароли (secrets.php) в снимок не копируются.
@@ -170,29 +157,29 @@ function cmdBackup(string $root, string $label): void
     );
     exec($dump, $out, $code);
     putenv('MYSQL_PWD');
-    if ($code !== 0) { echo "дамп базы не получился\n"; exit(1); }
+    if ($code !== 0) { echo "Could not dump the database\n"; exit(1); }
 
     $files = (int) trim((string) shell_exec('find ' . escapeshellarg($dest . '/project') . ' -type f | wc -l'));
     $size = trim((string) shell_exec('du -sh ' . escapeshellarg($dest) . ' | cut -f1'));
-    file_put_contents($dest . '/ОПИСЬ.txt', implode("\n", [
-        'СНИМОК ГОБЛИНА v2',
+    file_put_contents($dest . '/MANIFEST.txt', implode("\n", [
+        'Goblin Canvas backup',
         '',
-        'когда:  ' . date('d.m.Y H:i'),
-        'метка:  ' . $label,
-        'размер: ' . $size,
+        'Created:  ' . date('d.m.Y H:i'),
+        'Label:  ' . $label,
+        'Size: ' . $size,
         '',
-        'project/  код, инструкции, схема базы — ' . $files . ' файлов',
-        'db/       полный дамп базы ' . $c['name'],
+        'project/  code, instructions and database schema — ' . $files . ' files',
+        'db/       full database dump for ' . $c['name'],
         '',
-        'как вернуть:',
+        'Restore:',
         '  rsync -a project/ ' . $root . '/',
         '  mariadb -u' . $c['user'] . ' < db/' . $c['name'] . '.sql',
         '',
-        'внимание: рабочие папки public/workfiles входят; старые workspace/ и байты материалов data/files/ — нет.',
-        'внимание: secrets.php (ключи и пароли) в снимок не входит — храните его отдельно.',
+        'Includes public/workfiles. Back up workspace/ and data/files/ separately.',
+        'Keep the installation secrets.php separately.',
     ]) . "\n");
 
-    echo "готово: $dest ($size)\n";
+    echo "Done: $dest ($size)\n";
 }
 
 /* ── Уборка ───────────────────────────────────────────────────── */
@@ -201,15 +188,15 @@ function cmdBackup(string $root, string $label): void
 function cmdFilesGc(bool $apply): void
 {
     $gone = filesGc($apply);
-    printf("%s %d файлов, %.1f МБ%s\n", $apply ? 'удалено' : 'лишние:', $gone['files'], $gone['bytes'] / 1048576,
-        $apply ? '' : ' — повторите с --apply');
+    printf("%s %d files, %.1f MB%s\n", $apply ? 'Removed:' : 'Unused:', $gone['files'], $gone['bytes'] / 1048576,
+        $apply ? '' : ' — use --apply to remove them');
 }
 
 /* ── Карта кода ───────────────────────────────────────────────── */
 
 function cmdMap(string $root): void
 {
-    $lines = ["# Карта кода Гоблина v2", '', 'Собрано командой `php bin/server.php map` из шапок файлов.', ''];
+    $lines = ["# Goblin Canvas source map", '', 'Generated from source headers by `php bin/server.php map`.', ''];
     foreach (['lib', 'public/src', 'bin'] as $where) {
         $lines[] = '## ' . $where;
         $lines[] = '';
@@ -228,7 +215,7 @@ function cmdMap(string $root): void
         }
         $lines[] = '';
     }
-    // Диагностика: только в stdout. Файлов не создаёт — ручной md_backend/ru/structure.md не трогает.
+    // Карта приложения выводится в stdout.
     echo implode("\n", $lines) . "\n";
 }
 
@@ -238,14 +225,14 @@ function mapHead(string $path): string
     $text = (string) file_get_contents($path, false, null, 0, 600);
     if (preg_match('#/\*+\s*(.+?)[\r\n]#s', $text, $m)) return trim($m[1]);
     if (preg_match('#^\s*//\s*(.+)$#m', $text, $m)) return trim($m[1]);
-    return 'без шапки';
+    return 'No file header';
 }
 
 /* ── Фоновые задания встроенного ИИ ───────────────────────────── */
 
 function cmdAiJob(int $id): void
 {
-    if (!$id) { echo "нужен номер задания\n"; exit(1); }
-    if (!function_exists('aiJobRun')) { echo "модуль ИИ ещё не подключён\n"; exit(1); }
+    if (!$id) { echo "A job ID is required\n"; exit(1); }
+    if (!function_exists('aiJobRun')) { echo "The AI module is unavailable\n"; exit(1); }
     aiJobRun($id);
 }

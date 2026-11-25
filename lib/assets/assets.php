@@ -28,7 +28,10 @@ function assetShape(array $row, bool $withBody = false): array
     if ($row['file_key'] === null && str_starts_with((string) $row['uri'], '/') && !is_file((string) $row['uri'])) {
         $out['missing'] = true;
     }
-    if ($row['file_key'] !== null) $out['file'] = true;
+    if ($row['file_key'] !== null) {
+        $out['file'] = true;
+        if (!is_file(config()['files_dir'] . '/' . $row['file_key'] . '.bin')) $out['missing'] = true;
+    }
     // Путь от папки схемы — файл у агента в вебе (assetAtAgent): байтов на сервере нет.
     if (assetAtAgentUri($row['file_key'], $row['uri'])) $out['agent'] = true;
     if ($row['mime'] !== '')       $out['mime'] = (string) $row['mime'];

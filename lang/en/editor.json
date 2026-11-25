@@ -14,10 +14,13 @@
  "editor.settings.docs": "Documentation",
  "editor.settings.docs_open": "Goblin documentation",
  "editor.settings.docs_hint": "Goblin documentation — opens in a new tab",
+ "editor.settings.first_steps": "First steps",
  "editor.settings.help": "Guide",
  "editor.settings.leader_guide": "Leader instructions",
  "editor.settings.lists": "Lists",
  "editor.settings.open_folder_first": "Open a folder first",
+ "editor.graph.add_block": "Add block",
+ "editor.graph.connect": "Connect",
  "editor.account.mine": "My account",
  "editor.account.login": "Sign in"
 }

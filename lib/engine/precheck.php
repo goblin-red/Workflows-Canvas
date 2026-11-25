@@ -10,6 +10,10 @@ declare(strict_types=1);
 function runCheck(): void
 {
     $project = requireProject(false);
+    if (input('parent') !== null) {
+        $graph = nativeScene((int) $project['id'], runParentAsked());
+        reply(['parent' => $graph['folder']] + folderPrecheck($graph['settings'], $graph));
+    }
     $folderId = inputInt('folder');
     if (!$folderId) throw new ApiError(ta('agents.precheck.no_folder'), 'not_found');
     $folder = folderRow($folderId, (int) $project['id']);
@@ -23,10 +27,10 @@ function runCheck(): void
  * Тем же смотрит задание leader (`docs.run`), поэтому это отдельная функция, а не часть ответа.
  * Схему читает тем же графом, что и ход (engineGraph): правила, входы и выходы — одни.
  */
-function folderPrecheck(array $folder): array
+function folderPrecheck(array $folder, ?array $graph = null): array
 {
     $folderId = (int) $folder['id'];
-    $graph = engineGraph($folderId);
+    $graph ??= engineGraph($folderId);
     // По номерам — так схему видит человек, и так называются проблемы.
     $nodes = $graph['nodes'];
     uasort($nodes, static fn(array $a, array $b): int => (int) $a['no'] <=> (int) $b['no']);
@@ -35,7 +39,7 @@ function folderPrecheck(array $folder): array
     $steps = 0;
 
     // Агенты в вебе работают в своей папке на своём компьютере: папка на диске сервера им не нужна.
-    if (agentsRemote()) {
+    if (agentsRemote() || !empty($graph['native'])) {
         // проверять на сервере нечего
     } elseif ((string) $folder['work_dir'] === '') {
         $problems[] = ['what' => 'folder', 'say' => ta('agents.precheck.no_work_dir')];
@@ -75,7 +79,8 @@ function folderPrecheck(array $folder): array
 
         // Критерий выбора у ромба — условие cond (его считает движок) или ТЗ (решает человек).
         $byCond = $type === 'decision' && trim((string) graphProp($graph, $id, 'cond', '')) !== '';
-        if (kindRule($type)['spec'] && !$byCond && taskText($id) === '') {
+        $ownBranches = $type === 'decision' && !graphBinaryBranches($graph, $id);
+        if (kindRule($type)['spec'] && !$byCond && !$ownBranches && runTaskText($graph, $id) === '') {
             $problems[] = ['what' => 'element', 'no' => $no,
                 'say' => $type === 'decision' ? ta('agents.precheck.decision_no_cond') : ta('agents.precheck.no_spec')];
         }
@@ -84,7 +89,7 @@ function folderPrecheck(array $folder): array
         if ($type === 'decision' && ($say = precheckExits($graph, $id)) !== '') {
             $problems[] = ['what' => 'element', 'no' => $no, 'say' => $say];
         }
-        if ($type === 'gateway' && !$node['target_folder_id']) {
+        if ($type === 'gateway' && empty($node['target_block_id']) && !$node['target_folder_id']) {
             $problems[] = ['what' => 'element', 'no' => $no, 'say' => ta('agents.precheck.gateway_no_target')];
         }
         // Правило записано неверно — ход его не поймёт: назвать, а не угадывать.
@@ -102,7 +107,7 @@ function folderPrecheck(array $folder): array
         if (count($ins) < 2) continue;
         if ((string) graphProp($graph, (int) $id, 'join', 'all') !== 'all') continue;
 
-        if (branchesOfSameFork($ins)) {
+        if (branchesOfSameFork($graph, $ins)) {
             $problems[] = ['what' => 'element', 'no' => (int) $node['no'],
                 'say' => ta('agents.precheck.join_fork')];
         }
@@ -110,7 +115,7 @@ function folderPrecheck(array $folder): array
 
     // Цикл без возвратной стрелки: блок в начале круга ждёт и вход, и возврат,
     // а возврат не придёт, пока блок не сделан, — прогон встаёт на первом же круге.
-    $loop = folderLoopWithoutBack($folderId);
+    $loop = folderLoopWithoutBack($folderId, $graph);
     if ($loop) {
         $problems[] = ['what' => 'element', 'no' => $loop['to'],
             'say' => ta('agents.precheck.loop', ['from' => $loop['from'], 'to' => $loop['to']])];
@@ -134,12 +139,24 @@ function precheckSay(array $one): string
     return (isset($one['no']) ? ta('agents.precheck.at_block', ['no' => (int) $one['no']]) : '') . (string) $one['say'];
 }
 
-/**
- * Выходы ромба: ровно один «да» и ровно один «нет», других нет. Отдаёт текст проблемы или ''.
- * Два «да» или стрелка без ветки — движок пошёл бы по первой подходящей, вторую молча бросил.
- */
+/** Проверить ключи исходов и сохранить прежние сообщения для старых схем. */
 function precheckExits(array $graph, int $id): string
 {
+    if (!graphBinaryBranches($graph, $id)) {
+        $branches = graphBranches($graph, $id);
+        if (!$branches) return branchMessage('unknown');
+        $keys = [];
+        $defaults = 0;
+        foreach ($branches as $edge) {
+            $key = $edge['branch'];
+            if ($key === '' || trim($key) !== $key || isset($keys[$key]) || !is_string($edge['condition'])) {
+                return branchMessage('invalid');
+            }
+            $keys[$key] = true;
+            $defaults += (int) $edge['default'];
+        }
+        return $defaults > 1 ? branchMessage('invalid') : '';
+    }
     $count = ['yes' => 0, 'no' => 0, 'other' => 0];
     foreach (graphOut($graph, $id) as $edgeId) {
         $branch = (string) ($graph['edges'][$edgeId]['branch'] ?? '');
@@ -186,7 +203,7 @@ function folderWarnings(int $folderId, ?array $graph = null): array
            по одному жетону и выдаётся по разу на каждую ветку, каждый раз с частью входа. */
         if ((string) graphProp($graph, $id, 'join', 'all') === 'all') continue;
         $ins = precheckIns($graph, $id);
-        if (count($ins) >= 2 && !branchesOfSameFork($ins)) {
+        if (count($ins) >= 2 && !branchesOfSameFork($graph, $ins)) {
             $out[] = ['no' => (int) $node['no'], 'title' => (string) $node['title'],
                 'say' => ta('agents.precheck.join_any')];
         }
@@ -200,16 +217,13 @@ function folderWarnings(int $folderId, ?array $graph = null): array
  * Обходим схему в глубину по обычным стрелкам. Встретили блок, который
  * ещё на пути, — это круг, и стрелка к нему его замыкает: её и помечают.
  */
-function folderLoopWithoutBack(int $folderId): ?array
+function folderLoopWithoutBack(int $folderId, ?array $graph = null): ?array
 {
+    $graph ??= engineGraph($folderId);
     $next = [];
-    $no = [];
-    foreach (dbAll('SELECT id, `no` FROM elements WHERE folder_id = ?', [$folderId]) as $row) {
-        $no[(int) $row['id']] = (int) $row['no'];
-    }
-    foreach (dbAll("SELECT from_id, to_id FROM elements WHERE folder_id = ? AND type = 'arrow' AND back = 0",
-        [$folderId]) as $arrow) {
-        $next[(int) $arrow['from_id']][] = (int) $arrow['to_id'];
+    $no = array_map(static fn(array $node): int => (int) $node['no'], $graph['nodes']);
+    foreach ($graph['edges'] as $arrow) {
+        if (!(int) $arrow['back']) $next[(int) $arrow['from_id']][] = (int) $arrow['to_id'];
     }
 
     $state = [];   // 1 — на пути сейчас, 2 — пройден
@@ -234,41 +248,38 @@ function folderLoopWithoutBack(int $folderId): ?array
  * Смотрим назад по стрелкам на несколько шагов: развилка редко стоит прямо
  * перед сборщиком, чаще между ними есть пара блоков.
  */
-function branchesOfSameFork(array $arrows): bool
+function branchesOfSameFork(array $graph, array $arrows): bool
 {
-    $forks = [];
+    $must = $memo = [];
     foreach ($arrows as $arrow) {
-        // Стрелка прямо из ромба — её ветка известна сразу; дальше — все ромбы позади.
-        $own = in_array($arrow['branch'] ?? '', ['yes', 'no'], true) ? [(int) $arrow['from_id'] => $arrow['branch']] : [];
-        foreach ($own + forksBehind((int) $arrow['from_id']) as $forkId => $branch) {
-            if (isset($forks[$forkId]) && $forks[$forkId] !== $branch) return true;
-            $forks[$forkId] = $branch;
+        $seen = [];
+        $path = forksBehind($graph, $arrow, $seen, $memo);
+        foreach ($path as $forkId => $edgeId) {
+            if (isset($must[$forkId]) && $must[$forkId] !== $edgeId) return true;
+            $must[$forkId] = $edgeId;
         }
     }
     return false;
 }
 
-/**
- * Ромбы, из которых можно прийти в этот элемент: ромб => ветка. Идём назад
- * по прямым стрелкам до входа — и сквозь ромбы тоже: развилка бывает вложенной.
- * Ближний ромб записан первым; каждый элемент смотрим один раз.
- */
-function forksBehind(int $elementId, array &$seen = []): array
+/** Ветки, обязательные для данного входа. После join=any обязательны лишь общие для путей. */
+function forksBehind(array $graph, array $edge, array &$seen, array &$memo): array
 {
-    $out = [];
-    $ins = dbAll(
-        "SELECT a.branch, f.id, f.type FROM elements a JOIN elements f ON f.id = a.from_id
-          WHERE a.type = 'arrow' AND a.to_id = ? AND a.back = 0",
-        [$elementId]
-    );
-    foreach ($ins as $row) {
-        $id = (int) $row['id'];
-        if ($row['type'] === 'decision') $out += [$id => (string) $row['branch']];
-        if (isset($seen[$id])) continue;
-        $seen[$id] = true;
-        $out += forksBehind($id, $seen);
+    $source = (int) $edge['from_id'];
+    if (isset($seen[$source])) return [];
+    $seen[$source] = true;
+    if (!isset($memo[$source])) {
+        $forks = null;
+        $all = graphProp($graph, $source, 'join', 'all') === 'all' && !graphIn($graph, $source, true);
+        foreach (graphIn($graph, $source, false) as $incoming) {
+            $next = forksBehind($graph, $graph['edges'][$incoming], $seen, $memo);
+            $forks = $forks === null ? $next : ($all ? $forks + $next : array_intersect_assoc($forks, $next));
+        }
+        $memo[$source] = graphIn($graph, $source, true) ? [] : ($forks ?? []);
     }
-    return $out;
+    unset($seen[$source]);
+    $own = ($graph['nodes'][$source]['type'] ?? '') === 'decision' ? [$source => (int) $edge['id']] : [];
+    return $own + $memo[$source];
 }
 
 /**

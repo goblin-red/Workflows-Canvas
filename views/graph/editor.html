@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="{{lang}}" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Goblin · {{t:editor.looks.graph}}</title>
+  <link rel="icon" href="img/logo-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/tokens.css?v={{version}}">
+  <link rel="stylesheet" href="css/base.css?v={{version}}">
+  <link rel="stylesheet" href="css/chrome.css?v={{version}}">
+  <link rel="stylesheet" href="css/panel.css?v={{version}}">
+  <link rel="stylesheet" href="css/graph-canvas.css?v={{version}}">
+  <link rel="stylesheet" href="css/graph-projects.css?v={{version}}">
+  <link rel="stylesheet" href="css/graph-assistant.css?v={{version}}">
+  <link rel="stylesheet" href="css/ai-agent.css?v={{version}}">
+  <link rel="stylesheet" href="css/graph-editor.css?v={{version}}">
+  {{i18n}}
+  <script type="importmap">{{importmap}}</script>
+</head>
+<body class="graph-editor" data-left="tabs" data-view-only="{{viewOnly}}" data-catalog-enabled="{{catalogEnabled}}">
+  <header class="topbar graph-toolbar">
+    <nav id="graph-crumbs" class="graph-navigation" aria-label="{{t:editor.graph.crumbs}}"></nav>
+    <div class="graph-scene-controls" aria-label="{{t:editor.graph.scene_tools}}">
+      <div class="graph-view-controls" aria-label="{{t:editor.graph.scene_view}}">
+        <button class="btn btn-quiet" id="graph-view-canvas" aria-pressed="true">{{t:editor.variants.canvas}}</button>
+        <button class="btn btn-quiet" id="graph-view-list" aria-pressed="false" disabled>{{t:editor.variants.list}}</button>
+      </div>
+      <button class="btn btn-accent" id="graph-create" disabled>{{t:editor.graph.add_block}}</button>
+      <button class="btn" id="graph-catalog" hidden>{{t:editor.dialog.ns_catalog}}</button>
+      <button class="btn" id="graph-connect" aria-pressed="false" disabled>{{t:editor.graph.connect}}</button>
+      <button class="btn" id="graph-fit" disabled>{{t:editor.files.fit}}</button>
+      <button class="btn" id="graph-save" disabled>{{t:common.save}}</button>
+    </div>
+    <div class="graph-toolbar-settings">
+      <button class="btn btn-quiet" id="graph-run-toggle" type="button" aria-controls="graph-run" aria-expanded="false">
+        <span aria-hidden="true" id="graph-run-toggle-icon">▶</span><span id="graph-run-toggle-label">{{t:editor.variants.run}}</span>
+      </button>
+      <label class="graph-layout-choice">
+        <select class="input" id="graph-layout" aria-label="{{t:editor.graph.layout}}">
+          <option value="auto">{{t:editor.graph.layout_auto}}</option>
+          <option value="mobile">MOB</option>
+          <option value="desktop">PC</option>
+        </select>
+      </label>
+      <select class="input graph-skin-choice" id="graph-skin" aria-label="{{t:editor.topbar.look_pick}}">
+        <option value="graph" selected>{{t:editor.looks.graph}}</option>
+      </select>
+      <a class="btn btn-quiet graph-guide-link" href="first-steps.php" target="_blank" rel="noopener"
+         aria-label="{{t:editor.settings.first_steps}}" title="{{t:editor.settings.first_steps}}">?</a>
+    </div>
+  </header>
+  <main class="workspace">
+    <aside class="rail" aria-label="{{t:editor.graph.project_tree}}">
+      <div id="graph-projects-rail"><div id="graph-projects"></div></div>
+      <h2 class="panel-title" id="graph-tree-heading">{{t:editor.graph.project_tree}}</h2>
+      <nav id="graph-tree" aria-label="{{t:editor.graph.project_blocks}}"></nav>
+    </aside>
+    <section class="graph-scene" aria-label="{{t:editor.embed.scheme}}">
+      <div id="graph-canvas"></div>
+      <section id="graph-list" aria-label="{{t:editor.graph.scene_blocks}}" hidden></section>
+      <div id="graph-project-start" class="graph-project-start" hidden>
+        <div id="graph-projects-overview"></div>
+        <form id="graph-project-form" class="graph-project-form">
+          <label class="field"><span>{{t:editor.graph.project_key}}</span><input name="project" class="input" required></label>
+          <div class="row graph-project-actions">
+            <button class="btn btn-accent">{{t:editor.graph.open_project}}</button>
+            <a class="btn btn-quiet" href="first-steps.php" target="_blank" rel="noopener">{{t:editor.settings.first_steps}}</a>
+          </div>
+        </form>
+        <img class="graph-start-logo" src="img/logo-mark.svg" width="26" height="26" alt="Goblin">
+      </div>
+      <div class="graph-notice">
+        <p id="graph-status" role="status" aria-live="polite"></p>
+        <button class="btn" id="graph-retry" hidden>{{t:editor.newscheme.retry}}</button>
+      </div>
+    </section>
+    <aside class="panel" aria-label="{{t:editor.graph.panel}}">
+      <div class="graph-panel-tabs" aria-label="{{t:editor.graph.panel_sections}}">
+        <button class="btn btn-quiet" id="graph-properties-tab" aria-pressed="true" aria-controls="graph-panel">{{t:editor.panel.props}}</button>
+        <button class="btn btn-quiet" id="graph-run-tab" aria-pressed="false" aria-controls="graph-run">{{t:editor.variants.run}}</button>
+        <button class="btn btn-quiet" id="graph-assistant-tab" aria-pressed="false" aria-controls="graph-assistant">{{t:editor.tabs.ai}}</button>
+      </div>
+      <div class="panel-head" id="graph-panel-head">
+        <span id="graph-block-id" class="panel-no" hidden></span>
+        <h2 id="graph-panel-title" class="panel-kind">{{t:editor.panel.props}}</h2>
+      </div>
+      <div class="panel-body" id="graph-panel"></div>
+      <section class="panel-body graph-run" id="graph-run" aria-label="{{t:editor.graph.scene_run}}" hidden></section>
+      <div class="panel-body" id="graph-assistant" hidden></div>
+    </aside>
+  </main>
+  <dialog class="dialog graph-dialog" id="graph-dialog" aria-labelledby="graph-dialog-title">
+    <h2 class="dialog-title" id="graph-dialog-title"></h2>
+    <form>
+      <div id="graph-dialog-fields"></div>
+      <p id="graph-dialog-error" role="alert" hidden></p>
+      <div class="dialog-foot">
+        <button class="btn" type="button" id="graph-dialog-cancel">{{t:common.cancel}}</button>
+        <button class="btn btn-accent" id="graph-dialog-submit">{{t:common.save}}</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog class="dialog graph-dialog" id="graph-save-dialog" aria-labelledby="graph-save-title">
+    <h2 class="dialog-title" id="graph-save-title">{{t:common.save}}</h2>
+    <form id="graph-save-form">
+      <label class="field">
+        <span>{{t:editor.files.style_label}}</span>
+        <select class="input" name="style">
+          <option value="flat">{{t:editor.files.style_flat}}</option>
+          <option value="color">{{t:editor.files.style_color}}</option>
+        </select>
+      </label>
+      <div class="dialog-foot">
+        <button class="btn" type="button" id="graph-save-close">{{t:common.close}}</button>
+        <button class="btn" type="submit" value="html">HTML</button>
+        <button class="btn btn-accent" id="graph-save-pdf" type="submit" value="pdf">{{t:editor.files.format_pdf_vector}}</button>
+      </div>
+    </form>
+  </dialog>
+  <script type="module">
+    import 'goblin/graph/editor.js';
+  </script>
+</body>
+</html>

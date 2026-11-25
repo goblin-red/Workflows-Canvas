@@ -10,6 +10,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/../web/account/graph-read.php';
+
 /* ── Обзор ────────────────────────────────────────────────────── */
 
 function adminOverview(): array
@@ -37,6 +39,13 @@ function adminOverview(): array
         'jevTokens'     => $count("SELECT COALESCE(SUM(tokens_in + tokens_out),0) FROM api_calls WHERE service = 'jev'"),
     ];
 
+    if (webGraphAvailable()) {
+        $extra = dbRow('SELECT SUM(graph_folders) AS folders, SUM(graph_elements) AS elements FROM (SELECT '
+            . webGraphCountColumns() . ' FROM projects p) graph_totals');
+        $kpi['schemes'] += (int) $extra['folders'];
+        $kpi['elements'] += (int) $extra['elements'];
+    }
+
     // Активность по дням: правки, прогоны, обращения к ИИ.
     $series = static function (string $sql) use ($days): array {
         $rows = [];
@@ -49,11 +58,21 @@ function adminOverview(): array
         'ai'    => $series('SELECT DATE(created_at) day, COUNT(*) n FROM ai_jobs WHERE created_at > CURDATE() - INTERVAL ? DAY GROUP BY day'),
     ];
 
-    $live = dbAll("SELECT r.id, r.no, r.state, r.started_at, r.wait_for, p.url_key, p.title AS project, f.name AS folder, r.folder_id
-                     FROM runs r JOIN projects p ON p.id = r.project_id LEFT JOIN folders f ON f.id = r.folder_id
-                    WHERE r.state IN ('running','paused') ORDER BY r.id DESC LIMIT 20");
-    $recent = dbAll('SELECT p.id, p.url_key, p.title, p.updated_at, u.email AS owner
-                       FROM projects p LEFT JOIN users u ON u.id = p.owner_id ORDER BY p.updated_at DESC LIMIT 8');
+    $live = dbAll("SELECT r.id, r.no, r.state, r.started_at, r.wait_for, p.url_key, "
+            . webGraphProjectTitle() . " AS project, " . webGraphRunTitle() . " AS folder, r.folder_id, "
+            . webGraphRunParent() . " AS parent_block_id
+          FROM runs r JOIN projects p ON p.id = r.project_id
+          LEFT JOIN folders f ON f.id = r.folder_id AND f.project_id = r.project_id "
+            . webGraphRootJoin() . ' ' . webGraphRunJoin() . "
+          WHERE r.state IN ('running','paused') ORDER BY r.id DESC LIMIT 20");
+    $recent = dbAll('SELECT p.id, p.url_key, ' . webGraphProjectTitle() . ' AS title, '
+        . webGraphRootColumn() . ' AS root_id, p.updated_at, u.email AS owner
+           FROM projects p LEFT JOIN users u ON u.id = p.owner_id ' . webGraphRootJoin() . '
+          ORDER BY p.updated_at DESC LIMIT 8');
+    foreach ($recent as &$project) {
+        $project['editorUrl'] = webEditorUrl($project['url_key'], isset($project['root_id']) ? (int) $project['root_id'] : null);
+    }
+    unset($project);
 
     return ['kpi' => $kpi, 'activity' => $activity, 'live' => $live, 'recent' => $recent, 'health' => adminHealth(),
             'balance' => apiBalance()];
@@ -94,8 +113,15 @@ function adminHealth(): array
 
 function adminProjects(): array
 {
-    return array_map('adminProjectRow', dbAll(
-        "SELECT p.*, u.email AS owner,
+    return array_map('adminProjectRow', adminProjectsRaw());
+}
+
+/** Список и карточка используют одинаковые названия и счётчики. */
+function adminProjectsRaw(?int $id = null): array
+{
+    return dbAll(
+        "SELECT p.*, u.email AS owner, " . webGraphProjectTitle() . " AS display_title,
+                " . webGraphRootColumn() . " AS root_id, " . webGraphCountColumns() . ",
                 (SELECT COUNT(*) FROM folders f WHERE f.project_id = p.id) AS folders,
                 (SELECT COUNT(*) FROM elements e WHERE e.project_id = p.id AND e.type <> 'arrow') AS elements,
                 (SELECT COUNT(*) FROM runs r WHERE r.project_id = p.id) AS runs,
@@ -105,18 +131,21 @@ function adminProjects(): array
                 (SELECT COUNT(*) FROM ai_chats c WHERE c.project_id = p.id) AS chats,
                 (SELECT MAX(j.created_at) FROM journal j WHERE j.project_id = p.id) AS last_edit,
                 (SELECT COUNT(DISTINCT v.visitor) FROM visits v WHERE v.project_id = p.id) AS visitors
-           FROM projects p LEFT JOIN users u ON u.id = p.owner_id
-          ORDER BY p.updated_at DESC"
-    ));
+           FROM projects p LEFT JOIN users u ON u.id = p.owner_id " . webGraphRootJoin()
+        . ($id === null ? ' ORDER BY p.updated_at DESC' : ' WHERE p.id = ?'), $id === null ? [] : [$id]
+    );
 }
 
 function adminProjectRow(array $r): array
 {
     return [
-        'id' => (int) $r['id'], 'key' => $r['url_key'], 'title' => (string) $r['title'],
+        'id' => (int) $r['id'], 'key' => $r['url_key'], 'title' => (string) $r['display_title'],
+        'storedTitle' => (string) $r['title'], 'rootId' => isset($r['root_id']) ? (int) $r['root_id'] : null,
+        'editorUrl' => webEditorUrl($r['url_key'], isset($r['root_id']) ? (int) $r['root_id'] : null),
         'owner' => $r['owner'], 'ownerId' => $r['owner_id'] ? (int) $r['owner_id'] : null,
-        'folders' => (int) $r['folders'], 'elements' => (int) $r['elements'], 'runs' => (int) $r['runs'],
-        'live' => (int) $r['live'], 'assets' => (int) $r['assets'], 'agents' => (int) $r['agents'],
+        'folders' => (int) $r['folders'] + (int) $r['graph_folders'],
+        'elements' => (int) $r['elements'] + (int) $r['graph_elements'], 'runs' => (int) $r['runs'],
+        'live' => (int) $r['live'], 'assets' => (int) $r['assets'] + (int) $r['graph_assets'], 'agents' => (int) $r['agents'],
         'chats' => (int) $r['chats'], 'visitors' => (int) $r['visitors'],
         'guestWrite' => (int) $r['guest_write'] === 1, 'aiConfirm' => (int) $r['ai_confirm'] === 1,
         'strictChecks' => (int) $r['strict_checks'] === 1,
@@ -126,9 +155,8 @@ function adminProjectRow(array $r): array
 
 function adminProject(int $id): array
 {
-    $row = dbRow('SELECT p.*, u.email AS owner FROM projects p LEFT JOIN users u ON u.id = p.owner_id WHERE p.id = ?', [$id]);
+    $row = adminProjectsRaw($id)[0] ?? null;
     if (!$row) throw new ApiError(t('admin.err.no_project'), 'not_found');
-    $row = array_merge($row, adminProjectsRaw($id)[0] ?? []);
     return [
         'project' => adminProjectRow($row),
         'schemes' => adminSchemes($id),
@@ -139,51 +167,120 @@ function adminProject(int $id): array
     ];
 }
 
-/** Счётчики одного проекта — той же выборкой, что список. */
-function adminProjectsRaw(int $id): array
-{
-    return dbAll(
-        "SELECT (SELECT COUNT(*) FROM folders f WHERE f.project_id = p.id) AS folders,
-                (SELECT COUNT(*) FROM elements e WHERE e.project_id = p.id AND e.type <> 'arrow') AS elements,
-                (SELECT COUNT(*) FROM runs r WHERE r.project_id = p.id) AS runs,
-                (SELECT COUNT(*) FROM runs r WHERE r.project_id = p.id AND r.state IN ('running','paused')) AS live,
-                (SELECT COUNT(*) FROM assets a WHERE a.project_id = p.id) AS assets,
-                (SELECT COUNT(*) FROM agents g WHERE g.project_id = p.id) AS agents,
-                (SELECT COUNT(*) FROM ai_chats c WHERE c.project_id = p.id) AS chats,
-                (SELECT MAX(j.created_at) FROM journal j WHERE j.project_id = p.id) AS last_edit,
-                (SELECT COUNT(DISTINCT v.visitor) FROM visits v WHERE v.project_id = p.id) AS visitors
-           FROM projects p WHERE p.id = ?", [$id]);
-}
-
 /* ── Схемы (папки) ────────────────────────────────────────────── */
 
-/** Схемы установки или проекта; $folderId — одна схема той же выборкой (карточка схемы). */
+/** Автор известен только при наличии исходной записи о создании. */
+function adminSchemeAuthorSql(string $id, string $project, bool $native = false): string
+{
+    $operations = $native ? "('block.create','graph.template.apply')" : "('folder.create')";
+    return "(
+        SELECT COALESCE(NULLIF(u.name, ''), u.email)
+          FROM journal_ops jo JOIN journal j ON j.id = jo.journal_id
+          LEFT JOIN users u ON u.id = j.user_id
+         WHERE jo.op IN $operations AND jo.target_id = $id AND j.project_id = $project
+         ORDER BY jo.id LIMIT 1
+    )";
+}
+
+/** Схемы установки или проекта. $folderId открывает одну карточку прежней схемы. */
 function adminSchemes(?int $projectId = null, bool $check = false, ?int $folderId = null): array
 {
+    $folderBlock = webGraphAvailable() ? "(
+        SELECT block_id FROM graph_legacy_refs WHERE scope_id = f.project_id AND legacy_kind = 'folder' AND legacy_id = f.id
+    )" : 'NULL';
     $rows = dbAll(
-        "SELECT f.id, f.name, f.work_dir, f.parent_id, f.created_at, f.updated_at, f.project_id, p.url_key, p.title AS project,
+        "SELECT f.id, f.name, f.work_dir, f.parent_id, f.created_at, f.updated_at, f.project_id, p.url_key,
+                " . webGraphProjectTitle() . " AS project, $folderBlock AS folder_block_id,
+                " . adminSchemeAuthorSql('f.id', 'f.project_id') . " AS author,
                 SUM(e.type = 'block') AS blocks, SUM(e.type = 'decision') AS decisions, SUM(e.type = 'gateway') AS gateways,
                 SUM(e.type = 'arrow') AS arrows, SUM(e.type IN ('group','area')) AS frames, SUM(e.type = 'link') AS links,
                 SUM(e.type = 'block' AND EXISTS (SELECT 1 FROM props pr WHERE pr.element_id = e.id AND pr.name = 'start' AND pr.value = '1')) AS starters,
                 (SELECT COUNT(*) FROM runs r WHERE r.folder_id = f.id) AS runs,
                 (SELECT r.state FROM runs r WHERE r.folder_id = f.id ORDER BY r.id DESC LIMIT 1) AS last_run,
                 (SELECT MAX(r.started_at) FROM runs r WHERE r.folder_id = f.id) AS last_run_at
-           FROM folders f JOIN projects p ON p.id = f.project_id
+           FROM folders f JOIN projects p ON p.id = f.project_id " . webGraphRootJoin() . "
            LEFT JOIN elements e ON e.folder_id = f.id
           WHERE (? IS NULL OR f.project_id = ?) AND (? IS NULL OR f.id = ?)
           GROUP BY f.id ORDER BY f.updated_at DESC",
         [$projectId, $projectId, $folderId, $folderId]
     );
-    return array_map(static function (array $r) use ($check): array {
+    $schemes = array_map(static function (array $r) use ($check): array {
         $out = [
-            'id' => (int) $r['id'], 'name' => (string) $r['name'], 'projectId' => (int) $r['project_id'],
+            'id' => (int) $r['id'], 'type' => 'legacy', 'name' => (string) $r['name'], 'projectId' => (int) $r['project_id'],
             'key' => $r['url_key'], 'project' => (string) $r['project'], 'workDir' => (string) $r['work_dir'],
+            'author' => $r['author'],
+            'editorUrl' => webEditorUrl($r['url_key'], isset($r['folder_block_id']) ? (int) $r['folder_block_id'] : null, (int) $r['id']),
             'blocks' => (int) $r['blocks'], 'decisions' => (int) $r['decisions'], 'gateways' => (int) $r['gateways'],
             'arrows' => (int) $r['arrows'], 'frames' => (int) $r['frames'], 'links' => (int) $r['links'],
             'starter' => (int) $r['starters'] > 0, 'runs' => (int) $r['runs'], 'lastRun' => $r['last_run'],
             'lastRunAt' => $r['last_run_at'], 'created' => $r['created_at'], 'updated' => $r['updated_at'],
         ];
         if ($check) $out['problems'] = adminPrecheck((int) $r['id']);
+        return $out;
+    }, $rows);
+    if ($folderId !== null || !webGraphAvailable()) return $schemes;
+    $schemes = array_merge($schemes, adminNativeSchemes($projectId, $check));
+    usort($schemes, static fn(array $a, array $b): int => strcmp($b['updated'], $a['updated']));
+    return $schemes;
+}
+
+/** Перенесённая папка уже представлена прежней строкой. */
+function adminNativeSchemes(?int $projectId, bool $check): array
+{
+    $runs = webGraphRunsAvailable() ? "
+        (SELECT COUNT(*) FROM runs r WHERE r.parent_block_id = b.id AND r.project_id = b.scope_id) AS runs,
+        (SELECT r.state FROM runs r WHERE r.parent_block_id = b.id AND r.project_id = b.scope_id ORDER BY r.id DESC LIMIT 1) AS last_run,
+        (SELECT MAX(r.started_at) FROM runs r WHERE r.parent_block_id = b.id AND r.project_id = b.scope_id) AS last_run_at
+        " : '0 AS runs, NULL AS last_run, NULL AS last_run_at';
+    $rows = dbAll(
+        "SELECT b.id, b.title AS name, b.properties, b.scope_id AS project_id, b.created_at, b.updated_at, p.url_key,
+                " . webGraphProjectTitle() . " AS project,
+                " . adminSchemeAuthorSql('b.id', 'b.scope_id', true) . " AS author, $runs
+           FROM blocks b JOIN projects p ON p.id = b.scope_id " . webGraphRootJoin() . "
+          WHERE (? IS NULL OR b.scope_id = ?) AND b.kind IN ('folder','scheme')
+            AND NOT EXISTS (
+                SELECT 1 FROM graph_legacy_refs g JOIN folders f ON f.id = g.legacy_id AND f.project_id = g.scope_id
+                 WHERE g.scope_id = b.scope_id AND g.block_id = b.id AND g.legacy_kind = 'folder'
+            )",
+        [$projectId, $projectId]
+    );
+    return array_map(static function (array $r) use ($check): array {
+        $id = (int) $r['id'];
+        $scope = (int) $r['project_id'];
+        [$blocks, $arrows] = graphScene($scope, $id, true);
+        $children = array_slice($blocks, 1);
+        $counts = array_count_values(array_column($children, 'kind'));
+        $edges = array_count_values(array_column($arrows, 'kind'));
+        $properties = graphProperties($r['properties']);
+        $starter = false;
+        foreach ($children as $block) {
+            if ($block['kind'] !== 'block') continue;
+            $props = graphProperties($block['properties']);
+            if (($props['start'] ?? $props['legacyProps']['start'] ?? null) === true) {
+                $starter = true;
+                break;
+            }
+        }
+        $out = [
+            'id' => $id, 'type' => 'native', 'name' => $r['name'], 'projectId' => $scope,
+            'key' => $r['url_key'], 'project' => $r['project'], 'author' => $r['author'],
+            'workDir' => is_string($properties['workDir'] ?? null) ? $properties['workDir'] : '',
+            'editorUrl' => !empty(config()['graph_editor']) ? webEditorUrl($r['url_key'], $id)
+                : 'graph.php#' . http_build_query(['p' => $r['url_key'], 'b' => $id]),
+            'blocks' => $counts['block'] ?? 0, 'decisions' => $counts['decision'] ?? 0, 'gateways' => $counts['gateway'] ?? 0,
+            'frames' => ($counts['group'] ?? 0) + ($counts['area'] ?? 0),
+            'arrows' => $edges['flow'] ?? 0, 'links' => $edges['link'] ?? 0, 'starter' => $starter,
+            'runs' => (int) $r['runs'], 'lastRun' => $r['last_run'], 'lastRunAt' => $r['last_run_at'],
+            'created' => $r['created_at'], 'updated' => $r['updated_at'],
+        ];
+        if ($check) {
+            try {
+                $graph = nativeScene($scope, $id);
+                $out['problems'] = array_column(folderPrecheck($graph['settings'], $graph)['problems'], 'say');
+            } catch (Throwable $error) {
+                $out['problems'] = [$error->getMessage()];
+            }
+        }
         return $out;
     }, $rows);
 }
@@ -224,13 +321,15 @@ function adminRuns(?int $projectId = null, int $limit = 500, ?int $folderId = nu
 {
     $rows = dbAll(
         "SELECT r.id, r.no, r.state, r.driver, r.judge, r.jev, r.engine, r.started_at, r.finished_at, r.wait_for,
-                r.project_id, r.folder_id, p.url_key, p.title AS project, f.name AS folder, a.name AS lead,
+                r.project_id, r.folder_id, p.url_key, " . webGraphRunParent() . " AS parent_block_id,
+                " . webGraphProjectTitle() . " AS project, " . webGraphRunTitle() . " AS folder, a.name AS lead,
                 COUNT(s.id) AS steps, SUM(s.state = 'accepted') AS accepted,
                 SUM(s.state IN ('failed','cancelled')) AS failed, SUM(s.state = 'returned') AS returned,
                 MAX(s.attempt) AS rounds,
                 TIMESTAMPDIFF(SECOND, r.started_at, COALESCE(r.finished_at, NOW(3))) AS seconds
            FROM runs r JOIN projects p ON p.id = r.project_id
-           LEFT JOIN folders f ON f.id = r.folder_id
+           LEFT JOIN folders f ON f.id = r.folder_id AND f.project_id = r.project_id "
+           . webGraphRootJoin() . ' ' . webGraphRunJoin() . "
            LEFT JOIN agents a ON a.id = r.lead_agent_id
            LEFT JOIN run_steps s ON s.run_id = r.id
           WHERE (? IS NULL OR r.project_id = ?) AND (? IS NULL OR r.folder_id = ?) AND (? IS NULL OR r.id = ?)
@@ -242,6 +341,8 @@ function adminRuns(?int $projectId = null, int $limit = 500, ?int $folderId = nu
         'judge' => $r['judge'], 'jev' => $r['jev'], 'engine' => (int) $r['engine'],
         'projectId' => (int) $r['project_id'], 'key' => $r['url_key'], 'project' => (string) $r['project'],
         'folderId' => $r['folder_id'] ? (int) $r['folder_id'] : null, 'folder' => (string) $r['folder'],
+        'parentBlockId' => isset($r['parent_block_id']) ? (int) $r['parent_block_id'] : null,
+        'editorUrl' => webGraphRunUrl($r),
         'lead' => $r['lead'], 'steps' => (int) $r['steps'], 'accepted' => (int) $r['accepted'],
         'failed' => (int) $r['failed'], 'returned' => (int) $r['returned'], 'rounds' => (int) $r['rounds'],
         'seconds' => (int) $r['seconds'], 'started' => $r['started_at'], 'finished' => $r['finished_at'],
@@ -310,7 +411,8 @@ function adminPerson(int $id): array
     if (!$user) throw new ApiError(t('admin.err.no_user'), 'not_found');
     return [
         'user' => $user,
-        'projects' => dbAll('SELECT id, url_key AS `key`, title, updated_at FROM projects WHERE owner_id = ? ORDER BY updated_at DESC', [$id]),
+        'projects' => dbAll('SELECT p.id, p.url_key AS `key`, ' . webGraphProjectTitle() . ' AS title, p.updated_at
+                  FROM projects p ' . webGraphRootJoin() . ' WHERE p.owner_id = ? ORDER BY p.updated_at DESC', [$id]),
         'sessions' => dbAll("SELECT id, tail, created_at, last_used_at, expires_at FROM tokens
                               WHERE user_id = ? AND scope = 'session' AND revoked_at IS NULL ORDER BY id DESC LIMIT 50", [$id]),
     ];
@@ -340,17 +442,18 @@ function adminJournal(array $filter, int $page = 1, int $size = 50): array
     if (!empty($filter['days']))    { $where[] = 'j.created_at > NOW() - INTERVAL ? DAY'; $args[] = (int) $filter['days']; }
     if (!empty($filter['op']))      { $where[] = 'EXISTS (SELECT 1 FROM journal_ops o WHERE o.journal_id = j.id AND o.op = ?)'; $args[] = (string) $filter['op']; }
     if (!empty($filter['q'])) {
-        $where[] = '(j.label LIKE ? OR p.url_key LIKE ? OR p.title LIKE ?)';
+        $where[] = '(j.label LIKE ? OR p.url_key LIKE ? OR p.title LIKE ? OR ' . webGraphProjectTitle() . ' LIKE ?)';
         $like = '%' . $filter['q'] . '%';
-        array_push($args, $like, $like, $like);
+        array_push($args, $like, $like, $like, $like);
     }
-    $sql = ' FROM journal j LEFT JOIN projects p ON p.id = j.project_id LEFT JOIN users u ON u.id = j.user_id WHERE ' . implode(' AND ', $where);
+    $sql = ' FROM journal j LEFT JOIN projects p ON p.id = j.project_id LEFT JOIN users u ON u.id = j.user_id '
+        . webGraphRootJoin() . ' WHERE ' . implode(' AND ', $where);
     $total = (int) dbValue('SELECT COUNT(*)' . $sql, $args);
     $size = max(10, min(200, $size));
     $pages = max(1, (int) ceil($total / $size));
     $page = max(1, min($pages, $page));
 
-    $rows = dbAll('SELECT j.id, j.created_at, j.via, j.label, j.op_scope, j.rev, j.run_id, p.url_key, p.title AS project,
+    $rows = dbAll('SELECT j.id, j.created_at, j.via, j.label, j.op_scope, j.rev, j.run_id, p.url_key, ' . webGraphProjectTitle() . ' AS project,
                           j.project_id, u.email,
                           (SELECT GROUP_CONCAT(DISTINCT o.op ORDER BY o.op SEPARATOR \', \') FROM journal_ops o WHERE o.journal_id = j.id) AS ops,
                           (SELECT COUNT(*) FROM journal_ops o WHERE o.journal_id = j.id) AS n'
@@ -422,9 +525,9 @@ function adminAi(): array
         // Правила модели по файлам: общие, режимы, рисование, метод конструктора и опыт каталога.
         'rules' => array_merge(array_map(static fn(array $one) => [
             'file' => $one[0], 'name' => $one[1],
-            'chars' => mb_strlen(aiSection(langFile(config()['instructions_dir'], $one[0], 'ru'), $one[1])),
+            'chars' => mb_strlen(aiSection(langFile(config()['instructions_dir'], $one[0], 'en'), $one[1])),
         ], [['deepseek.md', 'common'], ['deepseek.md', 'assistant'], ['deepseek.md', 'simulation'],
-            ['рисование.md', 'drawing'], ['конструктор.md', 'constructor']]),
+            ['drawing.md', 'drawing'], ['builder.md', 'constructor']]),
             [['file' => t('admin.data.rules_catalog'), 'name' => t('admin.data.rules_catalog_name'), 'chars' => mb_strlen(catalogDigest())]]),
     ];
 }

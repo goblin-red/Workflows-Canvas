@@ -32,7 +32,7 @@
   padding:10px 12px;overflow:hidden;border-radius:6px;min-height:0}
 
 .node-title{color:var(--card-ink,var(--ink));flex:0 0 auto;font-weight:600;font-size:var(--f-md);line-height:1.3;overflow:hidden}
-.node-desc{flex:0 1 auto;font-size:var(--f-sm);color:var(--card-ink-dim,var(--ink-dim));overflow:hidden;min-height:0}
+.node-desc{flex:0 1 auto;font-size:var(--f-md);color:var(--card-ink-dim,var(--ink-dim));overflow:hidden;min-height:0}
 
 .node-image-section{display:block;flex:1 1 auto;width:calc(100% + 24px);margin:4px -12px;
   height:140px;max-height:45%;min-height:0;object-fit:cover;
@@ -242,20 +242,14 @@ body.iso .node-grip{display:none}
 /* Статус шага у ромба — по его контуру (css/run.css): полосы слева у ромба нет,
    форму держит clip-path, поэтому цветом статуса красится сама обводка. */
 .node.node.decision.selected .node-card{background:var(--accent);box-shadow:none}
-/* Текст ромба — по центру и по вертикали, и по горизонтали; поля по краям
-   оставлены под боковые ярлыки «да» и «нет». */
-.node.decision .node-inner{align-items:center;justify-content:center;text-align:center;
-  padding-left:44px;padding-right:44px}
-/* У ромба заголовок без плашки: полоса поперёк развилки выглядела чужой
-   прямоугольной вставкой. Сам заголовок прижат к верху и вынут из потока,
-   поэтому описание стоит ровно посередине фигуры, а не под ним. */
+/* В ромбе заголовок, описание и ответ делят высоту карточки.
+   Поля по краям оставляют место для ярлыков веток. */
+.node.decision .node-inner{align-items:stretch;justify-content:flex-start;text-align:center;
+  padding:4px min(52px, 26%);gap:2px}
 .node.decision .node-title,.node.decision .node-desc{text-align:center;width:100%;
   background:none;border:none;padding:0}
-/* Заголовок ромба центрируется и как текст, и как строка-флекс: в «Классике»
-   шапка выложена флексом, и одного text-align мало — буквы прижимались к краю
-   и уезжали под скошенный угол. */
-.node.decision .node-title{position:absolute;left:0;right:0;top:10px;z-index:2;
-  justify-content:center;padding-left:34px;padding-right:34px}
+.node.decision .node-title{position:relative;justify-content:center;
+  flex:0 1 auto;min-height:1.3em;overflow-wrap:anywhere}
 /* У ромба значки разведены по верхним углам: номер слева, остальные справа.
    На своём обычном месте они попадали ровно на боковой ярлык «да». */
 .node.decision .node-seq-badge{left:-9px;right:auto}
@@ -263,15 +257,10 @@ body.iso .node-grip{display:none}
    состояния с кругом («✓ ↻2») ложился на название ромба. Боковой ярлык
    «НЕТ» стоит посередине высоты — с ним они не встречаются. */
 .node.decision .node-marks{top:10px;right:-9px}
-/* Ответ исполнителя у ромба — внизу по центру: в общем потоке плашка
-   ложилась ровно поверх описания. */
-.node.decision .node-result{position:absolute;left:52px;right:52px;bottom:12px;
-  align-self:auto;margin:0;text-align:center;white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis}
-/* Описание держим ровно в центре фигуры: в общем потоке его сдвигали вверх
-   значки и плашка агента, у которых свои прижимы к низу. */
-.node.decision .node-desc{position:absolute;left:52px;right:52px;width:auto;top:50%;
-  transform:translateY(-50%);margin:0;max-height:56%;overflow:hidden;text-align:center}
+.node.decision .node-result{align-self:stretch;margin:auto 0 0;padding-block:1px;text-align:center}
+.node.decision .node-desc{flex:0 1 auto;margin:auto 0;min-height:1.25em;max-height:none;
+  line-height:1.25;overflow-wrap:anywhere}
+.node.decision .node-desc[contenteditable]{overflow:auto}
 /* Развилка подписана с боков: направо «да», налево «нет» — так её читают
    на бумаге, и стрелки ветвей уже не надо разглядывать. */
 .node-yes,.node-no{position:absolute;top:50%;transform:translateY(-50%);z-index:11;

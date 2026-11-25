@@ -37,7 +37,6 @@ export async function render(root, route) {
       { key: 'passport', title: t('admin.w.passport'), value: (c) => Object.keys(c.passport).length,
         render: (c) => el('span', Object.keys(c.passport).length ? '' : 'adm-faint', Object.keys(c.passport).length ? t('admin.templates.filled') : t('admin.templates.blank')) },
       { key: 'sort', title: t('admin.w.order'), type: 'num' },
-      { key: 'en', title: t('admin.templates.en_col'), value: (c) => (c.en.title ? 1 : 0), render: (c) => enMark(c.en.title ? 2 : 0) },
     ],
     onRow: (c) => editCategory(c, route),
   }));
@@ -54,7 +53,6 @@ export async function render(root, route) {
         render: (tpl) => (tpl.inCatalog ? badge('accepted', t('admin.w.in_catalog')) : badge('', t('admin.w.hidden'))) },
       { key: 'checked', title: t('admin.templates.checked'), type: 'date', render: (tpl) => el('span', tpl.checked ? '' : 'adm-faint', tpl.checked ? fmt.date(tpl.checked) : t('admin.w.none')) },
       { key: 'steps', title: t('admin.w.steps_n'), type: 'num' },
-      { key: 'en', title: t('admin.templates.en_col'), value: (tpl) => enScore(tpl), render: (tpl) => enMark(enScore(tpl)) },
       { key: 'updated', title: t('admin.w.edited'), type: 'date' },
     ],
     filters: [
@@ -74,70 +72,11 @@ export async function render(root, route) {
 
 function editTemplate(tpl, categories, route) {
   remember('templates', tpl.id);
-  const holder = el('div');
-  const draw = (lang) => holder.replaceChildren(langSwitch(lang, draw), lang === 'ru' ? ruTemplate(tpl, categories, route) : enTemplate(tpl, route, lang));
-  draw('ru');
+  const holder = editMainTemplate(tpl, categories, route);
   openDrawer({ title: tpl.title, text: tpl.inCatalog ? t('admin.w.in_catalog') : t('admin.w.hidden'), body: holder, onClose: () => remember('templates') });
 }
 
-/** Переключатель языка правки: Русский — основные поля, English — перевод в i18n.en. */
-function langSwitch(lang, draw) {
-  const row = el('div', 'adm-chips');
-  for (const [code, name] of [['ru', 'Русский'], ['en', 'English']]) {
-    const chip = el('button', 'adm-chip' + (lang === code ? ' on' : ''), name);
-    chip.onclick = () => draw(code);
-    row.append(chip);
-  }
-  return row;
-}
-
-/** Есть ли английская версия схемы: 0 — нет, 1 — часть (название или тело), 2 — и название, и тело. */
-function enScore(tpl) {
-  return (tpl.en.title ? 1 : 0) + (tpl.en.hasBody ? 1 : 0);
-}
-
-function enMark(score) {
-  if (score >= 2) return badge('accepted', t('admin.templates.en_full'));
-  return score ? badge('', t('admin.templates.en_part')) : el('span', 'adm-faint', t('admin.w.none'));
-}
-
-/** Английская версия схемы: название, описание, паспорт и тело — в i18n.en. */
-function enTemplate(tpl, route, lang) {
-  const title = input(tpl.en.title);
-  title.placeholder = tpl.title;
-  const about = area(tpl.en.about, 2);
-  about.placeholder = tpl.about;
-  const passport = passportForm(TEMPLATE_PASSPORT, tpl.en.passport);
-  const save = el('button', 'btn btn-accent', t('common.save'));
-  save.onclick = () => act('template.update', { id: tpl.id, lang, title: title.value, about: about.value, passport: passport.read() })
-    .then(() => route.refresh());
-
-  const folder = input('');
-  folder.placeholder = t('admin.w.folder_no');
-  const refresh = el('button', 'btn btn-quiet', t('admin.templates.refresh_body'));
-  refresh.onclick = async () => {
-    if (!folder.value.trim()) { folder.focus(); return; }
-    const ok = await confirmBox({ title: t('admin.templates.replace_title'), text: t('admin.templates.replace_text_lang'), ok: t('admin.templates.replace') });
-    if (!ok) return;
-    await act('template.fromFolder', { id: tpl.id, folder: Number(folder.value), lang });
-    route.refresh();
-  };
-
-  return el('div', '', [
-    el('p', 'adm-faint', t('admin.templates.lang_hint')),
-    field(t('admin.w.title'), title),
-    field(t('admin.w.about_short'), about),
-    el('div', 'adm-drawer-actions', [save]),
-    sub(t('admin.w.passport')),
-    passport.node,
-    el('div', 'adm-drawer-actions', [(() => { const b = el('button', 'btn btn-accent', t('admin.templates.save_passport')); b.onclick = save.onclick; return b; })()]),
-    sub(t('admin.templates.body')),
-    el('p', 'adm-faint', tpl.en.hasBody ? t('admin.templates.en_body_yes') : t('admin.templates.en_body_no')),
-    el('div', 'adm-form', [field(t('admin.templates.source_folder'), folder), refresh]),
-  ]);
-}
-
-function ruTemplate(tpl, categories, route) {
+function editMainTemplate(tpl, categories, route) {
   const title = input(tpl.title);
   const about = area(tpl.about, 2);
   const category = select(categories, tpl.category);
@@ -224,29 +163,11 @@ function fromFolder(categories, route) {
 /* ── Раздел ───────────────────────────────────────────────────── */
 
 function editCategory(c, route) {
-  const holder = el('div');
-  const draw = (lang) => holder.replaceChildren(langSwitch(lang, draw), lang === 'ru' ? ruCategory(c, route) : enCategory(c, route, lang));
-  draw('ru');
+  const holder = editMainCategory(c, route);
   openDrawer({ title: c.title, text: t('admin.templates.category_text', { key: c.key, count: c.count }), body: holder });
 }
 
-/** Английская версия раздела: название, описание и паспорт — в i18n.en. */
-function enCategory(c, route, lang) {
-  const title = input(c.en.title);
-  title.placeholder = c.title;
-  const about = area(c.en.about, 2);
-  about.placeholder = c.about;
-  const passport = passportForm(CATEGORY_PASSPORT, c.en.passport);
-  const save = el('button', 'btn btn-accent', t('common.save'));
-  save.onclick = async () => {
-    await act('category.save', { key: c.key, lang, title: title.value, about: about.value, passport: passport.read() });
-    route.refresh();
-  };
-  return el('div', '', [el('p', 'adm-faint', t('admin.templates.lang_hint')), field(t('admin.w.title'), title), field(t('admin.templates.description'), about),
-    sub(t('admin.templates.category_passport')), passport.node, el('div', 'adm-drawer-actions', [save])]);
-}
-
-function ruCategory(c, route) {
+function editMainCategory(c, route) {
   const title = input(c.title);
   const about = area(c.about, 2);
   const sort = input(String(c.sort));

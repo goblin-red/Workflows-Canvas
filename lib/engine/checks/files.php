@@ -35,7 +35,8 @@ function checkSubmit(array $project, array $run, array $step, string $result, ar
     // ── Образец ответа ───────────────────────────────────────
     // У блока может быть написано, как выглядит правильный ответ:
     // «a=<число> s=<число>». Не сошлось — работа не сделана как просили.
-    $answer = $step['element_id'] ? trim((string) runProp((int) $step['element_id'], 'answer', '')) : '';
+    $props = runStepProps($run, $step);
+    $answer = trim((string) ($props['answer'] ?? ''));
     if ($answer !== '' && $result !== '') {
         $fits = answerFits($result, $answer);
 
@@ -53,7 +54,7 @@ function checkSubmit(array $project, array $run, array $step, string $result, ar
     }
 
     // ── Обязательные выходы ──────────────────────────────────
-    $outputs = $step['element_id'] ? (array) runProp((int) $step['element_id'], 'outputs', []) : [];
+    $outputs = (array) ($props['outputs'] ?? []);
     if ($outputs) {
         $given = array_filter(array_map(static fn($f) => (string) ($f['output'] ?? ''), $files));
         $missing = array_diff($outputs, $given);
@@ -257,7 +258,7 @@ function filesReview(array $project, array $run, array $step, array $graph): str
     }
 
     // Обязательные выходы: свойство outputs у блока.
-    $outputs = graphProp($graph, (int) $step['element_id'], 'outputs', []);
+    $outputs = graphProp($graph, (int) historyNode($step), 'outputs', []);
     if (is_string($outputs)) $outputs = array_filter(array_map('trim', explode(',', $outputs)));
     $given = array_filter(array_map(static fn(array $f) => (string) $f['output'], $files));
     $missing = array_diff((array) $outputs, $given);

@@ -6,7 +6,8 @@ import { state, on, emit } from 'goblin/core/state.js';
 import { kindOf, iconOf, TOOLS } from 'goblin/core/kinds.js';
 import { toggleIso, camera, flyTo, fitZoom } from 'goblin/canvas/view.js';
 import { VARIANTS, setVariant, currentVariant } from 'goblin/core/variants.js';
-import { LOOKS, setLook, currentLook } from 'goblin/canvas/looks.js';
+import { SKINS, currentLook } from 'goblin/canvas/looks.js';
+import { selectClassicSkin } from 'goblin/shell/skin.js';
 import { undo, redo, canUndo, canRedo } from 'goblin/edit/history.js';
 import { openSettings } from 'goblin/shell/dialogs.js';
 import * as api from 'goblin/api/client.js';
@@ -71,7 +72,7 @@ export function initTopbar() {
     looks.querySelector('.look-trigger')?.setAttribute('aria-expanded', 'true');
   };
   const drawLooks = () => {
-    const now = LOOKS[currentLook()] || LOOKS.work;
+    const now = SKINS[currentLook()] || SKINS.work;
     looks.textContent = '';
     const trigger = document.createElement('button');
     trigger.className = 'switch-item switch-icon-item look-trigger';
@@ -83,13 +84,13 @@ export function initTopbar() {
     looks.append(trigger);
 
     menu.textContent = '';
-    for (const [name, item] of Object.entries(LOOKS)) {
+    for (const [name, item] of Object.entries(SKINS)) {
       const option = document.createElement('button');
       option.className = 'look-option' + (currentLook() === name ? ' on' : '');
       option.innerHTML = icon(item.icon) + `<b>${item.title}</b><small>${item.about}</small>`;
       option.dataset.look = name;
       option.setAttribute('aria-pressed', String(currentLook() === name));
-      option.onclick = () => { closeMenu(); setLook(name); };
+      option.onclick = () => { closeMenu(); void selectClassicSkin(name); };
       menu.append(option);
     }
   };
@@ -101,12 +102,12 @@ export function initTopbar() {
   window.addEventListener('resize', closeMenu);
   /* Вид карточек имеет смысл только на холсте, но прятать его нельзя:
      от этого шапка прыгала при каждом переключении вида работы. Гасим
-     на месте — кнопка остаётся, где была; в списке доступна только «Студия». */
+     на месте. В списке доступны «Студия» и переход в «Граф». */
   const showLooks = () => {
     const onCanvas = currentVariant() === 'canvas';
     looks.classList.toggle('dimmed', !onCanvas && currentLook() !== 'studio');
     for (const option of menu.querySelectorAll('.look-option')) {
-      option.disabled = !onCanvas && currentLook() !== 'studio' && option.dataset.look !== 'studio';
+      option.disabled = !onCanvas && currentLook() !== 'studio' && !['studio', 'graph'].includes(option.dataset.look);
     }
   };
   const redrawLooks = () => { drawLooks(); showLooks(); };
@@ -164,9 +165,8 @@ export function initTopbar() {
   iso.onclick = () => { toggleIso(); iso.classList.toggle('on', camera.iso); };
 
   // Режим показа: только холст.
-  /* Ссылка-задание для агента: окно с выбором — прогон (role=lead) или
-     рисование схемы (role=draw). По ссылке сервер сам соберёт текст задания
-     со ссылками на полные инструкции. С Shift — простая ссылка на холст, для человека. */
+  /* Ссылка для ведущего прогона и подключение редактора.
+     С Shift копируется ссылка на холст. */
   const linkBtn = document.getElementById('btn-link');
   const linkBox = document.getElementById('link-box');
   const site = () => location.origin + location.pathname.replace(/[^/]*$/, '');
@@ -196,7 +196,12 @@ export function initTopbar() {
   };
   // role=lead — чтобы агент по одной ссылке понял, что он leader (&worker= его сбивал).
   document.getElementById('link-run').onclick = () => copyTask('lead', t('editor.topbar.run_link_copied'));
-  document.getElementById('link-draw').onclick = () => copyTask('draw', t('editor.topbar.draw_link_copied'));
+  const editorLink = document.getElementById('link-draw');
+  editorLink.hidden = state.viewOnly;
+  editorLink.onclick = () => {
+    showLinks(false);
+    emit('ai-agent');
+  };
 
   // Закрыть щелчком мимо и клавишей Esc — как любое всплывающее окно.
   document.addEventListener('pointerdown', (event) => {

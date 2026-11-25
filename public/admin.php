@@ -8,6 +8,11 @@
 declare(strict_types=1);
 
 require __DIR__ . '/../lib/boot.php';
+
+if (($_SERVER['HTTP_X_GOBLIN_AI_AGENT'] ?? '') !== '') {
+    fail(t('server.token.wrong_op', ['op' => 'admin']), 'scope');
+}
+
 require __DIR__ . '/../lib/web/page.php';
 require __DIR__ . '/../lib/admin/data.php';
 require __DIR__ . '/../lib/admin/actions.php';

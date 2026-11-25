@@ -47,7 +47,7 @@ function workerExactScope(array $f, bool $claim): array
         if ($state !== null && (int) ($state['run']['engine'] ?? 1) === 1) return [];
     }
 
-    die_('для engine 2 нет точного run/step этой worker session — сначала goblin work',
+    die_('No active run and step are known for this worker session. Call goblin work first.',
         'worker_scope_required', 3);
 }
 
@@ -64,11 +64,11 @@ function cmdToken(array $f): int
        под конкретный прогон. Две одинаковые пары export от разных прогонов
        путались: называем тот, в котором пропуск выписан. */
     $where = runIdArg($f);
-    say("✓ пропуск агента {$answer['agent']['name']}"
-        . ($where !== null ? ' · выдан в прогоне ' . (ctype_digit($where) ? "r$where" : $where) : ''));
+    say("✓ worker pass {$answer['agent']['name']}"
+        . ($where !== null ? ' · issued in run ' . (ctype_digit($where) ? "r$where" : $where) : ''));
     say("export GOBLIN_AGENT={$answer['token']}");
     say("export GOBLIN_WORKER_SESSION=$session");
-    if ($where !== null) say('worker скажи работать в этом прогоне: goblin work --id '
+    if ($where !== null) say('Tell the worker to use this run: goblin work --id '
         . (ctype_digit($where) ? "r$where" : $where));
     return 0;
 }
@@ -88,7 +88,7 @@ function cmdWork(array $f): int
     // не ошибка, а сигнал расходиться: иначе круг зацикливался на отказе.
     if ($answer === null) {
         if (in_array(lastFail()->why, ['unauthorized', 'not_found'], true)) {
-            say('пропуск закрыт: прогон окончен, работа больше не придёт');
+            say('The run ended and the pass is closed. No more tasks will arrive.');
             return 0;
         }
         die_(lastFail()->getMessage());
@@ -96,15 +96,15 @@ function cmdWork(array $f): int
 
     if (empty($answer['ready'])) {
         if (!empty($answer['running'])) {
-            say('работы пока нет: leader ещё не открыл следующий шаг');
+            say('No work yet. The leader has not opened the next step.');
             return 3;
         }
-        say('прогонов больше нет — работа окончена');
+        say('No runs remain. Work is complete.');
         return 0;
     }
 
     $step = $answer['step'];
-    say("→ твой шаг {$step['no']}.{$step['attempt']}: {$step['title']}");
+    say("→ your step {$step['no']}.{$step['attempt']}: {$step['title']}");
     return cmdTask($f);
 }
 
@@ -125,7 +125,7 @@ function cmdTask(array $f): int
     /* Печатник один на все пути. Старый sayTask() не знал ни образца ответа,
        ни критериев, ни пределов, и `goblin task` показывал меньше, чем
        `goblin work`, — хотя за ними стоит один и тот же step.get. */
-    say('# Шаг ' . ($answer['address'] ?? '?') . ' · прогон ' . ($answer['run'] ?? '?'));
+    say('# Step ' . ($answer['address'] ?? '?') . ' · run ' . ($answer['run'] ?? '?'));
     sayPackageHead($answer, !empty($f['brief']));
     if (empty($f['brief'])) sayPackage($answer);
     return 0;
@@ -139,8 +139,8 @@ function cmdNote(array $f): int
         'text' => arg($f), 'stage' => $f['stage'] ?? null,
     ] + workerExactScope($f, true), $f);
     // Молчание выглядело как «команда не сработала»: отвечаем строкой.
-    say('✓ веха записана' . (!empty($f['stage']) ? " · {$f['stage']}" : ''));
-    if (!empty($answer['stop'])) say('⚠ просьба остановиться');
+    say('✓ milestone recorded' . (!empty($f['stage']) ? " · {$f['stage']}" : ''));
+    if (!empty($answer['stop'])) say('⚠ stop requested');
     return 0;
 }
 
@@ -151,7 +151,7 @@ function cmdJob(array $f): int
     if (arg($f) === 'list') {
         $jobs = peek($f)['jobs'] ?? [];
         if (!$jobs) {
-            say('заявок по этому шагу нет');
+            say('No jobs for this step.');
             return 0;
         }
         foreach ($jobs as $job) {
@@ -185,7 +185,7 @@ function cmdJob(array $f): int
         'state'  => $f['state'] ?? null,
         'error'  => $f['error'] ?? null,
     ], $f);
-    say("✓ заявка {$answer['job']['ref']}: {$answer['job']['state']} {$answer['job']['jobId']}");
+    say("✓ job {$answer['job']['ref']}: {$answer['job']['state']} {$answer['job']['jobId']}");
     return 0;
 }
 
@@ -230,7 +230,7 @@ function cmdSubmit(array $f): int
     // Про обычную сдачу leader писать не надо: круг видит её сам. Напоминаем
     // только там, где без слов не обойтись, — в падении и на последнем шаге
     // (последний шаг называет ТЗ).
-    if (!empty($answer['warnings'])) remind($f, $step, 'сдал с оговорками');
+    if (!empty($answer['warnings'])) remind($f, $step, 'submitted with warnings');
 
     /* --next: два запроса подряд — сдать, затем взять следующий шаг. Это удобство
        утилиты, а не API: оборвётся между ними — сдача уже подтверждена, и работу
@@ -276,7 +276,7 @@ function cmdFail(array $f): int
     $step = $answer['step'];
     say("fail {$step['no']}.{$step['attempt']}: " . ($step['error'] ?? ''));
     stepCacheForget($f);   // шаг закрыт: пропуск больше не нужен
-    remind($f, $step, 'упал');
+    remind($f, $step, 'failed');
     return 0;
 }
 
@@ -332,6 +332,6 @@ function remind(array $f, array $step, string $what): void
 {
     $who = leadName($f);
     if ($who === '') return;
-    say("→ доложи leader: SendMessage(to: \"$who\", "
+    say("→ Notify the leader: SendMessage(to: \"$who\", "
         . "message: \"$what {$step['no']}.{$step['attempt']} — …\")");
 }

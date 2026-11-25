@@ -75,7 +75,7 @@ function catalogGet(): void
 function catalogLocal(array $row, ?string $lang = null): array
 {
     $lang ??= langAgents();
-    if ($lang === 'ru') return $row;
+    if ($lang === 'en') return $row;
     $over = (json_decode((string) ($row['i18n'] ?? '{}'), true) ?: [])[$lang] ?? [];
     foreach (['title', 'about'] as $field) {
         if (isset($over[$field]) && is_string($over[$field])) $row[$field] = $over[$field];

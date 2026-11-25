@@ -11,6 +11,10 @@ declare(strict_types=1);
 
 function aiAsk(array $messages, array $options = []): array
 {
+    if (($user = aiSelectedAgentUser()) !== null) {
+        return aiAgentAsk($user, $messages, $options['kind'] ?? 'chat',
+            $options['target'] ?? $GLOBALS['goblin_terminal_agent_target'] ?? null);
+    }
     $c = aiAccess();   // свой доступ человека или общий установки (lib/ai/access.php)
     $body = [
         'model' => $options['model'] ?? $c['ai_model'],
@@ -29,8 +33,13 @@ function aiAsk(array $messages, array $options = []): array
     // Одна попытка исправить формат: дальше это уже не наша забота.
     // Расход второго вызова прибавляется к первому: платим за оба.
     if (!is_array($data)) {
-        $messages[] = ['role' => 'assistant', 'content' => $text];
-        $messages[] = ['role' => 'user', 'content' => ta('agents.ai.retry_json')];
+        $prompt = ta('agents.ai.retry_json');
+        if (isset($options['retry_json_shape'])) {
+            $prompt .= "\n" . $options['retry_json_shape'];
+        } else {
+            $messages[] = ['role' => 'assistant', 'content' => $text];
+        }
+        $messages[] = ['role' => 'user', 'content' => $prompt];
         $body['messages'] = $messages;
         $answer = aiHttp($c['ai_api_url'], $c['ai_api_key'], $body);
         $more = aiUsageOf($answer);
@@ -48,7 +57,16 @@ function aiAsk(array $messages, array $options = []): array
         'think' => $think,
         'model' => $answer['model'] ?? $body['model'],
         'usage' => $usage,
+        'jsonFailure' => is_array($data) ? null : aiJsonFailure($answer, $text),
     ];
+}
+
+/** Причина сбоя формата без текста запроса или ответа. */
+function aiJsonFailure(array $answer, string $text): array
+{
+    $bytes = strlen(trim($text));
+    $truncated = ($answer['choices'][0]['finish_reason'] ?? null) === 'length';
+    return ['reason' => $truncated ? 'truncated' : ($bytes === 0 ? 'blank' : 'invalid'), 'bytes' => $bytes];
 }
 
 /** Расход одного вызова. */
@@ -87,7 +105,7 @@ function aiHttp(string $url, string $key, array $body): array
     $plain = '';                   // ответ не потоком (отказ сервера или адрес без потока) — целиком
     $streamed = false;             // пришло хоть одно событие data:
     $begun = false;                // модель начала писать
-    $out = ['content' => '', 'reasoning' => '', 'model' => '', 'usage' => null, 'error' => ''];
+    $out = ['content' => '', 'reasoning' => '', 'model' => '', 'usage' => null, 'error' => '', 'finish' => null];
 
     $ch = curl_init($url);
     curl_setopt_array($ch, aiUrlGuard($url, 'ai_api_url') + [
@@ -111,7 +129,9 @@ function aiHttp(string $url, string $key, array $body): array
                 if (!empty($event['usage'])) $out['usage'] = $event['usage'];
                 // OpenRouter сообщает об ошибке посреди потока отдельным событием.
                 if (!empty($event['error'])) $out['error'] = (string) ($event['error']['message'] ?? json_encode($event['error']));
-                $delta = $event['choices'][0]['delta'] ?? [];
+                $choice = $event['choices'][0] ?? [];
+                if (isset($choice['finish_reason'])) $out['finish'] = $choice['finish_reason'];
+                $delta = $choice['delta'] ?? [];
                 $content = (string) ($delta['content'] ?? '');
                 $reasoning = (string) ($delta['reasoning_content'] ?? $delta['reasoning'] ?? '');   // reasoning — OpenRouter
                 $out['content'] .= $content;
@@ -160,7 +180,8 @@ function aiHttp(string $url, string $key, array $body): array
     // Поток собран в ту же форму, что ответ целиком: aiAsk() разницы не видит.
     $data = [
         'model' => $out['model'] ?: (string) ($body['model'] ?? ''),
-        'choices' => [['message' => ['content' => $out['content'], 'reasoning_content' => $out['reasoning']]]],
+        'choices' => [['finish_reason' => $out['finish'],
+            'message' => ['content' => $out['content'], 'reasoning_content' => $out['reasoning']]]],
     ];
     if ($out['usage']) $data['usage'] = $out['usage'];
     $log($data, '');

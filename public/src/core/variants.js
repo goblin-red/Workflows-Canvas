@@ -58,6 +58,7 @@ let wanted = null;     // последний запрошенный вид — �
 export function currentVariant() {
   const asked = hash().ui;
   if (asked && VARIANTS[asked]) return asked;
+  if (new URLSearchParams(location.search).get('visual') === '1') return 'canvas';
   try {
     const saved = localStorage.getItem(STORE);
     if (saved && VARIANTS[saved]) return saved;

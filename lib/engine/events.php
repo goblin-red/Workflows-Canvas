@@ -98,6 +98,7 @@ function eventAdd(array $e): int
 /** Событие, привязанное к шагу: номер и попытка подставляются сами. */
 function eventStep(array $step, string $kind, string $title, $body = null, array $more = []): int
 {
+    if (!empty($step['block_id'])) $more['meta'] = ['block' => (int) $step['block_id']] + ($more['meta'] ?? []);
     return eventAdd($more + [
         'project_id' => (int) $step['project_id'],
         'run_id'     => (int) $step['run_id'],

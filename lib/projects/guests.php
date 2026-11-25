@@ -11,7 +11,10 @@
 declare(strict_types=1);
 
 /** Операции, которые зовут платные модели: гостю — только при guest_ai. */
-const GUEST_AI_OPS = ['ai.chat.send', 'ai.build.start', 'ai.build.answer', 'voice.session', 'voice.speak', 'ai.play'];
+const GUEST_AI_OPS = [
+    'ai.chat.send', 'ai.build.start', 'ai.build.answer', 'ai.graph.propose', 'ai.graph.apply',
+    'voice.session', 'voice.speak', 'ai.play',
+];
 
 /** Из них только вошедшим, при любом guest_ai: голос и проигрывание (решение хозяина 30.09.2026, Б11). */
 const LOGIN_AI_OPS = ['voice.session', 'voice.speak', 'ai.play'];
@@ -85,7 +88,7 @@ function guestSweep(): int
                 static fn(array $op, array &$ctx): array => opRule((string) $op['op'])[1]($op, $ctx), false);
             $gone++;
         } catch (Throwable $e) {
-            error_log('[goblin] уборка проектов гостей: ' . $e->getMessage());
+            error_log('[goblin] guest project cleanup: ' . $e->getMessage());
         }
     }
     return $gone;

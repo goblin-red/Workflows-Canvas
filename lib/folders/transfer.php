@@ -41,6 +41,8 @@ function folderTransferDo(array $from, array $to, int $folderId): array
     $moved = 0;
     dbTransaction(static function () use ($fromId, $toId, $folder, &$moved) {
         dbAll('SELECT id FROM projects WHERE id IN (?,?) ORDER BY id FOR UPDATE', [$fromId, $toId]);
+        requireClassicSchemaWrite($fromId);
+        requireClassicSchemaWrite($toId);
         $lockedFolder = folderRow((int) $folder['id'], $fromId);
         $branch = folderBranch((int) $lockedFolder['id']);   // под lock: папка и все её потомки
         $moved = count($branch);

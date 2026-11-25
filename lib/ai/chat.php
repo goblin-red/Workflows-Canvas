@@ -84,6 +84,13 @@ function aiChatSend(): void
 
     $text = trim((string) (input('text') ?? ''));
     if ($text === '') throw new ApiError(t('agents.ai.empty_question'));
+    if (aiSessionAgentUser() === null) {
+        $access = aiAccess();
+        $host = strtolower((string) parse_url($access['ai_api_url'], PHP_URL_HOST));
+        if ($access['ai_api_url'] === '' || ($access['ai_api_key'] === '' && in_array($host, ['api.deepseek.com', 'openrouter.ai'], true))) {
+            throw new ApiError(t('agents.ai.connection_missing'), 'conflict');
+        }
+    }
 
     // Чат и папка — только из этого проекта: чужое отвечает «не найдено».
     $chatId = inputInt('chat');
@@ -105,10 +112,12 @@ function aiChatSend(): void
         $chatId = dbId();
     }
     dbRun('INSERT INTO ai_messages (chat_id, role, body) VALUES (?,?,?)', [$chatId, 'user', $text]);
+    $message = dbId();
 
     dbRun('INSERT INTO ai_jobs (chat_id, kind, request_id, state, user_id, context) VALUES (?,?,?,?,?,?)', [
         $chatId, 'reply', bin2hex(random_bytes(16)), 'queued', caller()['user_id'],
         aiJobContext(['folder' => $whole ? null : $folderId, 'project' => $projectId,
+                      'userMessageId' => $message,
                       // Что выделено на холсте (номера) и «смотреть весь проект».
                       'selected' => array_slice(array_map('intval', (array) (input('selected') ?? [])), 0, 50),
                       'whole' => $whole]),
@@ -137,6 +146,15 @@ function aiChatApply(): void
         $context = json_decode((string) $job['context'], true) ?: [];
         $compiled = aiCompile($ops, (int) ($context['folder'] ?? 0));
         if (!$compiled['ops']) throw new ApiError(t('agents.ai.nothing_to_apply'));
+        if (isset($context['terminalAgentScope'])) {
+            if (aiAgentAccountId() !== (int) ($context['terminalAgentUser'] ?? 0)
+                || (int) $project['owner_id'] !== (int) $context['terminalAgentUser']) {
+                throw new ApiError(t('server.ai.need_login'), 'scope');
+            }
+            if ($context['terminalAgentScope'] === 'scheme') {
+                aiAgentGuardLegacyOps((int) $project['id'], (int) ($context['folder'] ?? 0), $compiled['ops']);
+            }
+        }
         $result = runBatch($project, $compiled['ops'], 'aiApplyOp', false,
             ['via' => 'assistant', 'label' => t('server.ai.journal_job', ['job' => (int) $job['id']])]);
         dbRun("UPDATE ai_jobs SET state = 'applied', error = NULL WHERE id = ?", [$job['id']]);

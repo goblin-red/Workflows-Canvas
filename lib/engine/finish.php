@@ -26,7 +26,7 @@ function finishCheck(array $run, array $graph, array $steps, array $free, array 
     // Последняя попытка каждого узла.
     $last = [];
     foreach ($steps as $step) {
-        $id = (int) $step['element_id'];
+        $id = (int) historyNode($step);
         if (!$id) continue;
         if (!isset($last[$id]) || (int) $step['attempt'] > (int) $last[$id]['attempt']) $last[$id] = $step;
     }
@@ -51,7 +51,7 @@ function finishCheck(array $run, array $graph, array $steps, array $free, array 
     foreach ($graph['nodes'] as $id => $node) {
         $terminal = !graphOut($graph, $id)
             && ($node['type'] === 'block'
-                || ($node['type'] === 'gateway' && !empty($node['target_folder_id'])));
+                || ($node['type'] === 'gateway' && (!empty($node['target_folder_id']) || !empty($node['target_block_id']))));
         if (!$terminal || ($last[$id]['state'] ?? '') !== 'accepted') continue;
         $ended = true;
         break;

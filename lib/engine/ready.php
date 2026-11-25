@@ -15,7 +15,7 @@ function runReady(array $run, ?array $steps = null, ?array $graph = null): array
     // Закрытому прогону открывать нечего — граф и жетоны не считаем.
     if (!in_array($run['state'], ['running', 'paused'], true)) return [];
     if ((int) $run['engine'] !== 2) return marksReadyLegacy($run);
-    return readyList($run, $graph ?? engineGraph((int) $run['folder_id']), $steps);
+    return readyList($run, $graph ?? runScene($run), $steps);
 }
 
 /**
@@ -24,7 +24,7 @@ function runReady(array $run, ?array $steps = null, ?array $graph = null): array
  */
 function readyList(array $run, array $graph, ?array $steps = null): array
 {
-    $steps ??= dbAll('SELECT element_id, state FROM run_steps WHERE run_id = ?', [(int) $run['id']]);
+    $steps ??= dbAll('SELECT block_id, element_id, state FROM run_steps WHERE run_id = ?', [(int) $run['id']]);
     $free = marksFree((int) $run['id']);
 
     /* Живая попытка — открытая или принятая. Возвращённая, провалившаяся и отменённая
@@ -33,7 +33,7 @@ function readyList(array $run, array $graph, ?array $steps = null): array
     $had  = [];
     $open = [];
     foreach ($steps as $step) {
-        $elementId = (int) $step['element_id'];
+        $elementId = (int) historyNode($step);
         if (in_array($step['state'], ['issued', 'running', 'submitted'], true)) $open[$elementId] = true;
         if (in_array($step['state'], ['issued', 'running', 'submitted', 'accepted'], true)) $had[$elementId] = true;
     }
@@ -73,6 +73,12 @@ function readyShape(array $node, ?int $viaId, array $graph): array
         $row['cond'] = (string) graphProp($graph, $id, 'cond', '');
         $from = $viaId !== null ? (int) ($graph['edges'][$viaId]['from_id'] ?? 0) : 0;
         $row['from'] = $from ? (int) ($graph['nodes'][$from]['no'] ?? 0) : null;
+        if (!empty($graph['modern'])) {
+            $row['branches'] = array_values(array_map(static fn(array $edge): array => [
+                'edge' => (int) ($edge['arrow_id'] ?? $edge['id']), 'key' => $edge['branch'],
+                'label' => branchLabel($edge, 'ui'), 'condition' => $edge['condition'], 'default' => $edge['default'],
+            ], graphBranches($graph, $id)));
+        }
     }
     return $row;
 }

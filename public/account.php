@@ -11,6 +11,7 @@ declare(strict_types=1);
 require __DIR__ . '/../lib/boot.php';
 require __DIR__ . '/../lib/web/page.php';
 require __DIR__ . '/../lib/web/chrome.php';
+require __DIR__ . '/../lib/web/account/graph-read.php';
 require __DIR__ . '/../lib/web/account/structure.php';
 require __DIR__ . '/../lib/web/account/structure-view.php';
 
@@ -143,23 +144,49 @@ function accountLogin(string $notice): void
 
 function accountProjects(array $user): void
 {
-    $projects = userProjects((int) $user['id']);
+    $projects = accountGraphProjects(userProjects((int) $user['id']));
     echo '<h1>', h(t('account.nav.projects')), '</h1><table class="acc-table"><thead><tr><th>', h(t('account.w.project')), '</th><th>', h(t('account.w.folders')), '</th><th>', h(t('account.w.elements')), '</th><th>', h(t('account.projects.edited')), '</th><th></th></tr></thead><tbody>';
     foreach ($projects as $project) {
-        echo '<tr><td><a href="index.php#p=', h($project['url_key']), '">', h($project['title'] ?: $project['url_key']), '</a>',
+        $key = $project['url_key'];
+        $root = isset($project['root_id']) ? (int) $project['root_id'] : null;
+        echo '<tr><td><a href="', h(webEditorUrl($key, $root)), '">', h(($project['display_title'] ?? $project['title']) ?: $key), '</a>',
              (int) $project['mine'] ? ' <span class="tag">' . h(t('account.projects.mine')) . '</span>' : '', '</td>',
-             '<td>', (int) $project['folders'], '</td><td>', (int) $project['elements'], '</td>',
+             '<td>', (int) $project['folders'] + (int) ($project['graph_folders'] ?? 0), '</td><td>',
+             (int) $project['elements'] + (int) ($project['graph_elements'] ?? 0), '</td>',
              '<td class="muted">', h((string) $project['updated_at']), '</td>',
-             '<td><a class="btn btn-quiet" href="index.php?view=1#p=', h($project['url_key']), '">', h(t('account.projects.view')), '</a></td></tr>';
+             '<td><a class="btn btn-quiet" href="', h(webEditorUrl($key, $root, view: true)), '">', h(t('account.projects.view')), '</a></td></tr>';
     }
     if (!$projects) echo '<tr><td colspan="5" class="muted">', h(t('account.projects.empty')), '</td></tr>';
     echo '</tbody></table><p><a class="btn btn-accent" href="index.php">', h(t('account.projects.new')), '</a></p>';
+    accountRunHistory(array_column($projects, 'id'));
+}
+
+function accountRunHistory(array $projects): void
+{
+    if (!$projects) return;
+    $marks = implode(',', array_fill(0, count($projects), '?'));
+    $rows = dbAll('SELECT r.id, r.`no`, r.folder_id, r.state, r.started_at, p.url_key, '
+        . webGraphRunParent() . ' AS parent_block_id, ' . webGraphRunTitle() . ' AS scene, '
+        . webGraphProjectTitle() . ' AS project FROM runs r JOIN projects p ON p.id = r.project_id '
+        . 'LEFT JOIN folders f ON f.id = r.folder_id AND f.project_id = r.project_id '
+        . webGraphRootJoin() . ' ' . webGraphRunJoin() . " WHERE r.project_id IN ($marks) ORDER BY r.id DESC LIMIT 50", $projects);
+    if (!$rows) return;
+    echo '<h2>', h(t('admin.w.runs')), '</h2><table class="acc-table"><thead><tr><th>', h(t('account.structure.run')),
+         '</th><th>', h(t('account.w.project')), '</th><th>', h(t('admin.w.scheme')), '</th><th>', h(t('account.w.state')),
+         '</th><th>', h(t('account.ai.when')), '</th></tr></thead><tbody>';
+    foreach ($rows as $row) {
+        echo '<tr><td><a href="', h(webGraphRunUrl($row)), '">r', (int) $row['no'], '</a></td>',
+             '<td>', h($row['project'] ?: $row['url_key']), '</td><td>', h($row['scene']), '</td>',
+             '<td>', h(t('admin.state.' . $row['state'])), '</td><td class="muted">', h($row['started_at']), '</td></tr>';
+    }
+    echo '</tbody></table>';
 }
 
 function accountAgents(array $user): void
 {
     $rows = dbAll(
-        'SELECT a.*, p.url_key, p.title AS project FROM agents a JOIN projects p ON p.id = a.project_id
+        'SELECT a.*, p.url_key, ' . webGraphProjectTitle() . ' AS project, ' . webGraphRootColumn() . ' AS root_id
+           FROM agents a JOIN projects p ON p.id = a.project_id ' . webGraphRootJoin() . '
           WHERE p.owner_id = ? ORDER BY p.updated_at DESC, a.role, a.name LIMIT 300',
         [$user['id']]
     );
@@ -169,7 +196,8 @@ function accountAgents(array $user): void
         echo '<tr><td>', h($row['name']), '</td>',
              '<td><span class="tag ', h($row['role']), '">', $row['role'] === 'lead' ? t('account.agents.leader') : t('account.agents.worker'), '</span></td>',
              '<td class="muted">', h(trim($row['cli'] . ' ' . $row['model'] . ' ' . $row['effort'])), '</td>',
-             '<td><a href="index.php#p=', h($row['url_key']), '">', h($row['project'] ?: $row['url_key']), '</a></td></tr>';
+             '<td><a href="', h(webEditorUrl($row['url_key'], isset($row['root_id']) ? (int) $row['root_id'] : null)), '">',
+             h($row['project'] ?: $row['url_key']), '</a></td></tr>';
     }
     if (!$rows) echo '<tr><td colspan="4" class="muted">', h(t('account.agents.none')), '</td></tr>';
     echo '</tbody></table>';
@@ -199,14 +227,18 @@ function accountTokens(array $user): void
 
 function accountAi(array $user): void
 {
-    $projects = dbAll('SELECT id, url_key, title FROM projects WHERE owner_id = ?', [$user['id']]);
+    $projects = dbAll('SELECT p.id, p.url_key, ' . webGraphProjectTitle() . ' AS title
+                         FROM projects p ' . webGraphRootJoin() . ' WHERE p.owner_id = ?', [$user['id']]);
     echo '<h1>', h(t('account.ai.title')), '</h1><p class="muted">', h(t('account.ai.limit')), '</p>';
+    echo '<div class="acc-card" id="account-ai-agent"></div>',
+         '<script type="module">import { mountAiAgent } from "goblin/shell/ai-agent.js";',
+         'void mountAiAgent(document.getElementById("account-ai-agent"), {manage: true}).refresh();</script>';
     accountAccess($user);
 
     // Все разговоры целиком: в панели схемы видно только пять последних.
     $chats = dbAll(
-        'SELECT c.id, c.title, c.state, c.updated_at, p.url_key, p.title AS project
-           FROM ai_chats c JOIN projects p ON p.id = c.project_id
+        'SELECT c.id, c.title, c.state, c.updated_at, p.url_key, ' . webGraphProjectTitle() . ' AS project, '
+        . webGraphRootColumn() . ' AS root_id FROM ai_chats c JOIN projects p ON p.id = c.project_id ' . webGraphRootJoin() . '
           WHERE p.owner_id = ? ORDER BY c.updated_at DESC LIMIT 200',
         [$user['id']]
     );
@@ -220,7 +252,8 @@ function accountAi(array $user): void
                  '<td>', h((string) ($chat['project'] ?: $chat['url_key'])), '</td>',
                  '<td>', h((string) ($chat['title'] ?: t('account.ai.chat_default'))), '</td>',
                  '<td><a href="chat.php?project=', h(rawurlencode((string) $chat['url_key'])), '&chat=', (int) $chat['id'], '" target="_blank">', h(t('account.ai.open_log')), '</a> · ',
-                 '<a href="index.php#p=', h((string) $chat['url_key']), '">', h(t('account.ai.open_scheme')), '</a></td></tr>';
+                 '<a href="', h(webEditorUrl($chat['url_key'], isset($chat['root_id']) ? (int) $chat['root_id'] : null)), '">',
+                 h(t('account.ai.open_scheme')), '</a></td></tr>';
         }
         echo '</tbody></table>';
     }

@@ -476,11 +476,11 @@ function repaintSteps() {
 
 /*
  * Журнал подсветки: что горело в эту секунду. Пишется в память страницы
- * (`window.__подсветка`), потому что прогон меняется быстрее, чем человек
+ * (`window.__goblinHighlight`), потому что прогон меняется быстрее, чем человек
  * успевает смотреть, а разбирать потом надо по мгновениям, а не по итогу.
  */
 const paintLog = [];
-window.__подсветка = paintLog;
+window.__goblinHighlight = paintLog;
 
 function notePaint() {
   if (!state.run) return;
@@ -497,9 +497,9 @@ function notePaint() {
     }
     if (node.dataset.step) cards.push(`${element.no}:${node.dataset.step}`);
   }
-  const shot = { когда: new Date().toLocaleTimeString('ru-RU'), карточки: cards.join(' '), стрелки: arrows.join(' ') };
+  const shot = { time: new Date().toLocaleTimeString('en-US'), cards: cards.join(' '), arrows: arrows.join(' ') };
   const last = paintLog[paintLog.length - 1];
-  if (last && last.карточки === shot.карточки && last.стрелки === shot.стрелки) return;
+  if (last && last.cards === shot.cards && last.arrows === shot.arrows) return;
   paintLog.push(shot);
   if (paintLog.length > 300) paintLog.shift();
 }

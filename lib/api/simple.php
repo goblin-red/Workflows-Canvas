@@ -68,7 +68,7 @@ function goExchangeLog(array $lines, int $code): void
     if ($op === 'where' && input('short')) return;
 
     $ask = [$op];
-    foreach (['block', 'branch', 'result', 'why', 'text'] as $key) {
+    foreach (['block', 'branch', 'edge', 'result', 'why', 'text'] as $key) {
         $value = trim((string) (input($key) ?? ''));
         if ($value !== '') $ask[] = $key === 'result' || $key === 'why' ? $value : "$key=$value";
     }
@@ -87,7 +87,7 @@ function goExchangeLog(array $lines, int $code): void
             'took_ms' => (int) round((microtime(true) - (float) ($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true))) * 1000),
         ]);
     } catch (Throwable $e) {
-        error_log('[goblin] лента переписки: ' . $e->getMessage());   // ответ leader важнее ленты
+        error_log('[goblin] message timeline: ' . $e->getMessage());   // ответ leader важнее ленты
     }
 }
 
@@ -103,7 +103,7 @@ function goMove(int $runId): void
     try {
         engineAdvance($runId, true);
     } catch (Throwable $e) {
-        error_log('[goblin] ход простого пути: ' . $e->getMessage());
+        error_log('[goblin] workflow advance: ' . $e->getMessage());
     }
 }
 
@@ -124,8 +124,8 @@ function goMoveLines(int $runId): array
 function goTally(int $runId): string
 {
     $rows = dbAll(
-        "SELECT e.type, COUNT(*) n FROM run_steps s LEFT JOIN elements e ON e.id = s.element_id
-          WHERE s.run_id = ? AND s.state = 'accepted' GROUP BY e.type", [$runId]);
+        "SELECT COALESCE(s.block_kind, e.type) AS type, COUNT(*) n FROM run_steps s LEFT JOIN elements e ON e.id = s.element_id
+          WHERE s.run_id = ? AND s.state = 'accepted' GROUP BY COALESCE(s.block_kind, e.type)", [$runId]);
     $by = array_column($rows, 'n', 'type');
     $total = array_sum(array_map('intval', $by));
     // Формат постоянный: блоки и ромбы всегда, шлюзы — когда были.
@@ -139,10 +139,26 @@ function goTally(int $runId): string
 function goRun(int $projectId): array
 {
     $asked = runAsked($projectId);
-    if ($asked) return goLogRun(runRow($asked, $projectId));
+    $bound = (int) (caller()['run_id'] ?? 0);
+    if ($bound && $asked && $bound !== $asked) throw new ApiError(ta('agents.runs.token_other_run'), 'scope');
+    $parent = runParentAsked();
+    if ($asked || $bound) {
+        $run = runRow($asked ?: $bound, $projectId);
+        if (($parent !== null && $parent !== (int) ($run['parent_block_id'] ?? 0))
+            || (input('folder') !== null && inputInt('folder') !== (int) $run['folder_id'])) {
+            throw new ApiError(ta('agents.runs.token_other_run'), 'scope');
+        }
+        return goLogRun($run);
+    }
 
+    if ($parent !== null) {
+        $live = nativeActive($projectId, $parent);
+        if ($live) return goLogRun(runRow((int) $live['id'], $projectId));
+        throw new ApiError(ta('agents.go.no_live_run', ['folder' => $parent]), 'not_found');
+    }
     $folderId = inputInt('folder');
     if ($folderId) {
+        folderRow($folderId, $projectId);
         $live = runActive($folderId);
         if ($live) return goLogRun($live);
         throw new ApiError(ta('agents.go.no_live_run', ['folder' => $folderId]), 'not_found');
@@ -183,9 +199,9 @@ function goInputs(array $run, array $element, ?array $step): array
     /* Повтор по обратной стрелке приносит один жетон — от ромба. Вход прошлого
        круга добираем: без него «тема» из блока выше пропадала. Свежая строка
        того же блока заменяет прежнюю, прежние помечены — «(прежний вход)». */
-    $prev = dbRow("SELECT * FROM run_steps WHERE run_id = ? AND element_id = ? AND state = 'accepted'
+    $prev = dbRow("SELECT * FROM run_steps WHERE run_id = ? AND (block_id = ? OR element_id = ?) AND state = 'accepted'
                      AND id < ? ORDER BY id DESC LIMIT 1",
-        [(int) $run['id'], (int) $element['id'], $step ? (int) $step['id'] : PHP_INT_MAX]);
+        [(int) $run['id'], (int) $element['id'], (int) $element['id'], $step ? (int) $step['id'] : PHP_INT_MAX]);
     if (!$prev) return $rows;
     $fresh = array_column($rows, null, 'no');
     $out = [];
@@ -204,11 +220,12 @@ function goInputs(array $run, array $element, ?array $step): array
 function goRoundLine(array $step): ?string
 {
     if ((int) $step['attempt'] < 2) return null;
-    $back = dbRow("SELECT s.element_no, s.result, e.title, e.type FROM run_marks m
-                     JOIN run_steps s ON s.id = m.from_step_id JOIN elements e ON e.id = s.element_id
+    $back = dbRow("SELECT s.element_no, s.result, COALESCE(e.title, s.element_title) AS title,
+                        COALESCE(s.block_kind, e.type) AS type FROM run_marks m
+                     JOIN run_steps s ON s.id = m.from_step_id LEFT JOIN elements e ON e.id = s.element_id
                     WHERE m.taken_by_step_id = ? ORDER BY m.id DESC LIMIT 1", [(int) $step['id']]);
-    if (!$back || !dbValue("SELECT 1 FROM run_steps WHERE run_id = ? AND element_id = ? AND state = 'accepted'
-                              AND id < ? LIMIT 1", [(int) $step['run_id'], (int) $step['element_id'], (int) $step['id']])) {
+    if (!$back || !dbValue("SELECT 1 FROM run_steps WHERE run_id = ? AND (block_id = ? OR element_id = ?) AND state = 'accepted'
+                              AND id < ? LIMIT 1", [(int) $step['run_id'], historyNode($step), historyNode($step), (int) $step['id']])) {
         return null;   // не цикл, а переделка (again): вход тот же
     }
     return ta('agents.go.round_line', ['n' => (int) $step['attempt'],
@@ -229,14 +246,15 @@ function goTaskText(array $element, array $vars, array $inputs = [], string $wor
 {
     // Агент в вебе: папки — у него, материалы — ссылками, сделанное прогоном — по сданным файлам.
     $remote = (string) ($run['agent_dir'] ?? '') !== '';
-    $meaning = taskMeaning((int) $element['id']);
+    $native = !empty($run['parent_block_id']);
+    $meaning = $native ? nativeTaskMeaning($element) : taskMeaning((int) $element['id']);
     // Адрес «137.3» — блок и круг: с ним worker начинает ответ, по нему done узнаёт круг.
     $lines = [ta('agents.go.task_head', ['no' => (int) $element['no'], 'title' => $element['title']])
         . ($address !== '' ? ta('agents.go.task_address', ['address' => $address]) : '')];
 
     /* worker сидит в своей папке и «pic/» у себя не найдёт: путь ему даёт
        сервер, чтобы leader нечего было дописывать от себя. */
-    if ($workDir !== '') $lines[] = ta('agents.go.work_dir') . $workDir . ($remote ? ta('agents.go.work_dir_agent') : '');
+    if (!$native && $workDir !== '') $lines[] = ta('agents.go.work_dir') . $workDir . ($remote ? ta('agents.go.work_dir_agent') : '');
     /* Материалы — in/, результаты — своя папка прогона out/rN. ТЗ пишут просто «out/…»
        (и так же называют файлы ответы прошлых блоков) — это и есть она. */
     if ($outDir !== '') {
@@ -252,12 +270,14 @@ function goTaskText(array $element, array $vars, array $inputs = [], string $wor
     /* Материалы, прикреплённые к блоку (справка, вход, вложение), — строкой с путями.
        Так инструкция к сервису (grok.md) доходит только до тех блоков, что к нему
        обращаются: её прикрепили к ним, а не положили в общее ТЗ. */
-    $files = goBlockMaterials((int) $element['id'], $workDir, $remote ? $run : []);
+    $files = $native
+        ? array_map(static fn(array $file): string => $file['title'] . ' · ' . $file['url'], nativeMaterialLinks($element, false))
+        : goBlockMaterials((int) $element['id'], $workDir, $remote ? $run : []);
     if ($files) $lines[] = ta($remote ? 'agents.go.block_files_web' : 'agents.go.block_files') . implode(', ', $files);
 
     /* Что прогон уже сделал — файлы out/rN/ с диска. «Вход» несёт только ответы
        прямых предшественников, а блоку после развилки нужны и файлы выше по схеме. */
-    $made = $remote ? goRunFilesAgent($run) : goRunFiles($workDir, $outDir);
+    $made = $native ? [] : ($remote ? goRunFilesAgent($run) : goRunFiles($workDir, $outDir));
     if ($made) $lines[] = ta('agents.go.run_files') . implode(', ', $made);
 
     if ($vars) {
@@ -280,12 +300,12 @@ function goTaskText(array $element, array $vars, array $inputs = [], string $wor
         }
     }
     // Платные вызовы стоят денег: предел worker должен видеть в задании.
-    $paid = (int) runProp((int) $element['id'], 'paid_calls', 0);
+    $paid = $native ? (int) ($element['props']['paid_calls'] ?? 0) : (int) runProp((int) $element['id'], 'paid_calls', 0);
     if ($paid > 0) $lines[] = ta('agents.go.paid_max', ['n' => $paid]);
     // Сколько уже ушло за прогон — итоговому блоку не нужно искать по чужим заданиям.
     if ($spent > 0) $lines[] = ta('agents.go.paid_spent', ['n' => $spent]);
 
-    $answer = trim((string) runProp((int) $element['id'], 'answer', ''));
+    $answer = trim((string) ($native ? ($element['props']['answer'] ?? '') : runProp((int) $element['id'], 'answer', '')));
     if ($address !== '') {
         $lines[] = ta('agents.go.answer_as') . $address . ': ' . ($answer !== '' ? $answer : ta('agents.go.your_answer'));
     } elseif ($answer !== '') {
@@ -354,9 +374,9 @@ function goKeepTries(array $run, array $step): void
         [(int) $run['id'], (int) $step['element_id'], (int) $step['id']]);
     foreach ($rows as $row) {
         $path = (string) $row['uri'];
-        if (!str_starts_with($path, $out . '/') || str_contains($path, '/.попытки/') || !is_file($path)
+        if (!str_starts_with($path, $out . '/') || (str_contains($path, '/.attempts/') || str_contains($path, '/.попытки/')) || !is_file($path)
             || hash_file('sha256', $path) !== $row['sha256']) continue;
-        $keep = "$out/.попытки/{$row['element_no']}.{$row['attempt']}-" . basename($path);
+        $keep = "$out/.attempts/{$row['element_no']}.{$row['attempt']}-" . basename($path);
         if (!is_dir(dirname($keep))) @mkdir(dirname($keep), 0775, true);
         if (@copy($path, $keep)) dbRun('UPDATE assets SET uri = ? WHERE id = ?', [$keep, (int) $row['id']]);
     }
@@ -395,12 +415,12 @@ function goBlockMaterials(int $elementId, string $workDir, array $run = []): arr
  * Почему движок сам не выдаёт готовый блок — или null, если выдаст.
  * Те же причины, по которым advanceIssue зовёт человека.
  */
-function goStuck(int $runId, array $element): ?string
+function goStuck(int $runId, array $element, ?array $graph = null): ?string
 {
     $id = (int) $element['id'];
     // Попытки — как их видит advanceIssue: свежая первой.
-    $tries = dbAll('SELECT * FROM run_steps WHERE run_id = ? AND element_id = ? ORDER BY attempt DESC',
-        [$runId, $id]);
+    $tries = dbAll('SELECT * FROM run_steps WHERE run_id = ? AND (block_id = ? OR element_id = ?) ORDER BY attempt DESC',
+        [$runId, $id, $id]);
     $last = $tries[0] ?? null;
 
     if ($last && $last['state'] === 'failed') {
@@ -410,9 +430,10 @@ function goStuck(int $runId, array $element): ?string
     if (advanceAutoReturns($tries) >= 2) return ta('agents.go.stuck_twice');
 
     // Пустая карточка агента блок не держит: его делает ведущий сам.
-    if (taskText($id) === '') return ta('agents.go.stuck_no_spec');
+    $graph ??= engineGraph((int) $element['folder_id']);
+    if (runTaskText($graph, $id) === '') return ta('agents.go.stuck_no_spec');
 
-    $limit = graphMaxAttempts(engineGraph((int) $element['folder_id']), $id);
+    $limit = graphMaxAttempts($graph, $id);
     if (stepOverLimit($runId, (int) $element['no'], $limit)) return ta('agents.go.stuck_limit', ['n' => $limit]);
     return null;
 }
@@ -422,6 +443,17 @@ function goScheme(): void
 {
     $project = requireProject(false);
     $projectId = (int) $project['id'];
+    if (($parent = runParentAsked()) !== null) {
+        $bound = (int) (caller()['run_id'] ?? 0);
+        if ($bound) {
+            $run = runRow($bound, $projectId);
+            if ((int) ($run['parent_block_id'] ?? 0) !== $parent) throw new ApiError(ta('agents.runs.token_other_run'), 'scope');
+            $graph = runScene($run);
+        } else {
+            $graph = nativeScene($projectId, $parent);
+        }
+        plain(array_merge([$graph['settings']['name']], instrNativeLead($parent), goSchemeMap($parent, $graph)));
+    }
     $folder = folderRow((int) inputInt('folder'), $projectId);
     $folderId = (int) $folder['id'];
 
@@ -442,11 +474,16 @@ function goScheme(): void
             $agent ? ' → ' . $agent : '');
     }
     $lines[] = '';
-    foreach (dbAll("SELECT a.branch, f.`no` AS from_no, t.`no` AS to_no FROM elements a
-                      JOIN elements f ON f.id = a.from_id JOIN elements t ON t.id = a.to_id
-                     WHERE a.folder_id = ? AND a.type = 'arrow' ORDER BY a.`no`", [$folderId]) as $one) {
-        $lines[] = sprintf(ta('agents.go.scheme_arrow'), (int) $one['from_no'], (int) $one['to_no'],
-            $one['branch'] && $one['branch'] !== 'flow' ? ' [' . $one['branch'] . ']' : '');
+    $graph = engineGraph($folderId);
+    $edges = $graph['edges'];
+    uasort($edges, static fn(array $a, array $b): int => $a['no'] <=> $b['no']);
+    foreach ($edges as $edge) {
+        $branch = (string) $edge['branch'];
+        $decision = $graph['nodes'][(int) $edge['from_id']]['type'] === 'decision';
+        $show = $branch !== '' && ($branch !== 'flow' || ($decision && $graph['modern']));
+        if ($show && $graph['modern'] && $decision) $branch .= ' · edge=' . $edge['arrow_id'];
+        $lines[] = sprintf(ta('agents.go.scheme_arrow'), (int) $graph['nodes'][(int) $edge['from_id']]['no'],
+            (int) $graph['nodes'][(int) $edge['to_id']]['no'], $show ? " [$branch]" : '');
     }
 
     $live = runActive($folderId);
@@ -462,6 +499,9 @@ function goBegin(): void
 {
     $project = requireProject(true);
     $projectId = (int) $project['id'];
+    if (($parent = runParentAsked()) !== null) {
+        goBeginNative($project, $parent);
+    }
     $folderId = inputInt('folder');
     if (!$folderId) plain([ta('agents.go.need_folder')], 422);
 
@@ -517,25 +557,71 @@ function goBegin(): void
     ], goAbout($folderId), goNextLines($run)));
 }
 
+/** Текстовый прогон по каноническому родителю. */
+function goBeginNative(array $project, int $parent): void
+{
+    $projectId = (int) $project['id'];
+    if (!empty(caller()['run_id'])) throw new ApiError(ta('agents.runs.token_other_run'), 'scope');
+    $opened = engineLocked($projectId, static function () use ($projectId, $parent): array {
+        if ($live = nativeActive($projectId, $parent)) {
+            return ['live' => runRow((int) $live['id'], $projectId)];
+        }
+        $graph = nativeScene($projectId, $parent);
+        $folder = $graph['settings'];
+        $check = folderPrecheck($folder, $graph);
+        if (!$check['ready'] || count($check['entries']) !== 1) return ['check' => $check];
+
+        $start = $graph['nodes'][(int) $check['entries'][0]['id']];
+        $no = nextRunNo($projectId);
+        nativeWorkFolders((string) $folder['work_dir'], $no, $projectId);
+        $run = runInsert([
+            'project_id' => $projectId, 'parent_block_id' => $parent, '`no`' => $no, 'title' => $folder['name'],
+            'work_dir' => $folder['work_dir'], 'work_url' => $folder['work_url'],
+            'rev' => bumpRev($projectId), 'engine' => 2, 'driver' => 'lead', 'judge' => 'human', 'jev' => 'judge',
+            'graph_snapshot' => json_encode($graph, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+        ], $folder, $start, 'lead');
+        return ['run' => $run, 'graph' => $graph, 'check' => $check];
+    });
+    if (isset($opened['live'])) {
+        $run = goLogRun($opened['live']);
+        plain(array_merge([ta('agents.go.run_going', ['no' => (int) $run['no']])], goNextLines($run)), 409);
+    }
+    $check = $opened['check'];
+    if (!isset($opened['run'])) {
+        $lines = [ta('agents.go.not_ready')];
+        foreach ($check['problems'] as $one) $lines[] = '— ' . precheckSay($one);
+        if (count($check['entries']) > 1) $lines[] = ta('agents.go.one_entry', ['n' => count($check['entries'])]);
+        plain($lines, 409);
+    }
+
+    $run = goLogRun($opened['run']);
+    goMove((int) $run['id']);
+    plain(array_merge([
+        ta('agents.go.run_started', ['no' => (int) $run['no'], 'name' => $run['title']]),
+        ta('agents.go.call_it', ['no' => (int) $run['no']]),
+        ...goWarnings($check['warnings']),
+    ], instrNativeLead($parent), goAbout($parent, $opened['graph']), goNextLines($run)));
+}
+
 /**
  * Мягкая сверка принятого ответа — строки «⚠» ведущему и в ленту, не отказ:
  * вид по образцу answer (та же грамматика, что у проверок, answerFits) и
  * «вызовов=K» сверх paid_calls. Честное слово остаётся: принято всё.
  */
-function goAnswerWarnings(array $element, string $result, ?array $step = null): array
+function goAnswerWarnings(array $element, string $result, ?array $step = null, ?array $props = null): array
 {
     $id = (int) $element['id'];
     $out = [];
-    $answer = trim((string) runProp($id, 'answer', ''));
+    $answer = trim((string) ($props === null ? runProp($id, 'answer', '') : ($props['answer'] ?? '')));
     if ($answer !== '' && answerFits($result, $answer) === false) $out[] = ta('agents.go.warn_form', ['answer' => $answer]);
 
-    $paid = (int) runProp($id, 'paid_calls', 0);
+    $paid = (int) ($props === null ? runProp($id, 'paid_calls', 0) : ($props['paid_calls'] ?? 0));
     $calls = goCalls($result);
     if ($paid && $calls !== null && $calls > $paid) $out[] = ta('agents.go.warn_paid', ['calls' => $calls, 'paid' => $paid]);
 
     /* Арифметика блока (свойство expr) — та же сверка, что у формального судьи
        (lib/engine/judges/formal.php), только мягко: ответ уже принят, ⚠ для leader. */
-    $expr = trim((string) runProp($id, 'expr', ''));
+    $expr = trim((string) ($props === null ? runProp($id, 'expr', '') : ($props['expr'] ?? '')));
     if ($expr !== '' && $step) {
         $math = exprCheck($expr, varsIn((int) $step['id'])['vars'], varsParse($result));
         // Ожидаемых чисел не называем: ответ по подсказке — не счёт (как у судьи).
@@ -555,12 +641,13 @@ function goWarnings(array $warnings): array
  * видит их один раз, при begin: это второе исключение из каркаса текущего дела
  * (первое — ромб, который Jev не решил).
  */
-function goAbout(int $folderId): array
+function goAbout(int $folderId, ?array $graph = null): array
 {
     $lines = [];
-    $starter = folderStarters($folderId)[0] ?? null;
+    $graph ??= engineGraph($folderId);
+    $starter = $graph['nodes'][graphStarter($graph)] ?? null;
     if ($starter) {
-        $spec = specText('element_id', (int) $starter['id']);
+        $spec = runTaskSpec($graph, (int) $starter['id']);
         $text = trim(is_array($spec) ? (string) ($spec['text'] ?? '') : (string) $spec);
         $lines[] = ta('agents.go.starter_passed', ['no' => (int) $starter['no'], 'title' => $starter['title']]);
         if ($text !== '') {
@@ -574,7 +661,7 @@ function goAbout(int $folderId): array
     $lines[] = ta('agents.go.map_head');
     $lines[] = ta('agents.go.map_note1');
     $lines[] = ta('agents.go.map_note2');
-    foreach (goSchemeMap($folderId) as $one) $lines[] = $one;
+    foreach (goSchemeMap($folderId, $graph) as $one) $lines[] = $one;
     $lines[] = '╰───────────────────────────────────────────';
     return $lines;
 }
@@ -626,7 +713,7 @@ const GO_WHY_CHARS = 480;
 const GO_ANSWER_PREFIX = '/^(?:ОТВЕТ\s+(?:worker|ВОРКЕРА)|(?:worker\s+)?ANSWER(?:\s+worker)?)\s*:\s*/iu';
 
 /**
- * op=done&block=N[&result=…][&branch=yes|no] — дело сделано. GET или POST-форма:
+ * op=done&block=N[&result=…][&branch=KEY|&edge=ID] — дело сделано. GET или POST-форма:
  * длинный и многострочный ответ идёт телом (curl --data-urlencode result@-), в адрес он не влезает.
  *
  * Проверок нет: сказал leader — значит сделано. Ромбу нужна ветка,
@@ -667,11 +754,12 @@ function goDone(): void
         plain([ta('agents.go.too_long', ['bytes' => strlen($result), 'max' => STEP_RESULT_BYTES, 'run' => (int) $run['no']])], 422);
     }
 
-    $branch = goBranch();
+    $branch = trim((string) (input('branch') ?? ''));
+    $edgeId = branchInputEdge();
     $why = goWhy();
     $said = '';
 
-    engineLocked($projectId, static function () use ($runId, $projectId, $no, $result, $sent, $note, $branch, $why, $address, &$said): array {
+    engineLocked($projectId, static function () use ($runId, $projectId, $no, $result, $sent, $note, $branch, $edgeId, $why, $address, &$said): array {
         $run = runRow($runId, $projectId);
         /* Прогон закрыт: ответ на последний done мог потеряться в сети, и ведущий шлёт его снова.
            Точный повтор принятой сдачи — «повтор» и итог прогона, ничего не меняется;
@@ -682,36 +770,41 @@ function goDone(): void
             return [];
         }
 
-        $element = dbRow('SELECT * FROM elements WHERE project_id = ? AND folder_id = ? AND `no` = ?',
-            [$projectId, (int) $run['folder_id'], $no]);
+        $element = runElement($run, $no);
         if (!$element) throw new ApiError(ta('agents.go.no_block', ['no' => $no]), 'not_found');
 
         // Ромб: своя запись шага, ветку называет leader.
         if ($element['type'] === 'decision') {
-            if ($branch === '') {
+            $graph = runScene($run);
+            $id = (int) $element['id'];
+            $key = graphBinaryBranches($graph, $id) ? goBranch($branch) : $branch;
+            if ($key === '' && $edgeId === null) {
                 throw new ApiError(ta('agents.go.need_branch', ['no' => $no]), 'invalid');
             }
-            $arrow = dbRow("SELECT * FROM elements WHERE type = 'arrow' AND from_id = ? AND branch = ?",
-                [(int) $element['id'], $branch]);
-            if (!$arrow) throw new ApiError(ta('agents.go.no_exit', ['no' => $no, 'branch' => $branch]), 'conflict');
+            $choice = graphSelectBranch($graph, $id, $key, $edgeId);
+            $arrow = $choice['edge'];
+            if (!$arrow) throw new ApiError($choice['status'] === 'ambiguous' ? branchMessage('ambiguous')
+                : ta('agents.go.no_exit', ['no' => $no, 'branch' => $key !== '' ? $key : $edgeId]), 'conflict');
 
             try {
                 $enter = marksEnter($run, $element, null);
             } catch (ApiError $e) {
-                // Ромб уже решён, нового входа нет: та же ветка — повтор, другая — отказ.
-                $said = goDecidedAgain($runId, $element, $branch) ?? throw $e;
+                // Ромб уже решён, нового входа нет: та же стрелка — повтор, другая — отказ.
+                $said = goDecidedAgain($runId, $element, $graph, (int) $arrow['id']) ?? throw $e;
                 return [];
             }
-            stepDecideDo($run, $element, $arrow, $branch, $why, $enter, 'lead');
-            $said = ta('agents.go.decided', ['no' => $no, 'branch' => ta($branch === 'yes' ? 'agents.go.yes' : 'agents.go.no')]);
+            stepDecideDo($run, $graph['nodes'][$id], $arrow, $why, $enter, 'lead');
+            $said = ta('agents.go.decided', ['no' => $no, 'branch' => branchLabel($arrow, 'go')]);
             return [];
         }
 
         // Шлюз: шага у него нет, переход отмечает leader.
         if ($element['type'] === 'gateway') {
             $made = stepPassDo($run, $element);
-            $target = (int) $element['target_folder_id'];
-            $name = (string) dbValue('SELECT name FROM folders WHERE id = ?', [$target]);
+            $target = (int) ($element['target_block_id'] ?? $element['target_folder_id']);
+            $name = !empty($run['parent_block_id'])
+                ? (string) dbValue('SELECT title FROM blocks WHERE id = ? AND scope_id = ?', [$target, $projectId])
+                : (string) dbValue('SELECT name FROM folders WHERE id = ?', [$target]);
             $said = ta('agents.go.gateway_done', ['no' => $no, 'target' => $target, 'name' => $name, 'try' => $made['attempt']]);
             return [];
         }
@@ -763,7 +856,7 @@ function goDone(): void
             eventStep($step, 'file', ta('agents.go.ev_file', ['task' => "{$step['element_no']}.{$step['attempt']}"])
                 . mb_substr(implode(', ', $shown), 0, 200), ['files' => $shown]);
         }
-        $warn = goAnswerWarnings($element, $result, $step);
+        $warn = goAnswerWarnings($element, $result, $step, empty($run['parent_block_id']) ? null : $element['props']);
         if ($warn) eventStep($step, 'warn', '⚠ ' . implode(' · ', $warn), null, ['actor' => 'script']);
         $said = ta('agents.go.accepted', ['no' => $no, 'task' => "$no.{$step['attempt']}"])
             . ($sent !== '' ? ta('agents.go.accepted_answer', ['answer' => $sent]) : '')
@@ -797,11 +890,10 @@ function goRepeat(int $runId, int $no, ?array $address, string $result): ?string
     return $prev ? ta('agents.go.repeat_block', ['no' => $no]) : null;
 }
 
-/** Ветка ромба из &branch=: yes/no или да/нет, без учёта регистра; другое — пусто. */
-function goBranch(): string
+/** Бинарные ветки принимают прежние синонимы без учёта регистра. */
+function goBranch(string $key): string
 {
-    $said = mb_strtolower(trim((string) (input('branch') ?? '')));
-    return ['yes' => 'yes', 'no' => 'no', 'да' => 'yes', 'нет' => 'no'][$said] ?? '';
+    return ['yes' => 'yes', 'no' => 'no', 'да' => 'yes', 'нет' => 'no'][mb_strtolower($key)] ?? $key;
 }
 
 /** Причина &why= у done и fail — не длиннее GO_WHY_CHARS знаков, режется по знакам, не по байтам. */
@@ -815,15 +907,16 @@ function goWhy(): string
  * потерялся. Та же ветка — строка «повтор» с прежним решением, ничего не меняется;
  * другая — отказ 409 с ним же. Ромб ещё не решали — null: отвечает движок.
  */
-function goDecidedAgain(int $runId, array $element, string $branch): ?string
+function goDecidedAgain(int $runId, array $element, array $graph, int $edgeId): ?string
 {
-    $was = (string) dbValue(
-        "SELECT a.branch FROM run_steps s JOIN elements a ON a.id = s.chosen_edge_id
-          WHERE s.run_id = ? AND s.element_id = ? AND s.state = 'accepted' ORDER BY s.id DESC LIMIT 1",
-        [$runId, (int) $element['id']]);
-    if (!in_array($was, ['yes', 'no'], true)) return null;
-    $vars = ['no' => (int) $element['no'], 'branch' => ta($was === 'yes' ? 'agents.go.yes' : 'agents.go.no')];
-    if ($was !== $branch) throw new ApiError(ta('agents.go.decided_other', $vars), 'conflict');
+    $was = (int) dbValue(
+        "SELECT COALESCE(chosen_arrow_id, chosen_edge_id) FROM run_steps
+          WHERE run_id = ? AND (block_id = ? OR element_id = ?) AND state = 'accepted' ORDER BY id DESC LIMIT 1",
+        [$runId, (int) $element['id'], (int) $element['id']]);
+    $arrow = $graph['edges'][$was] ?? null;
+    if (!$arrow) return null;
+    $vars = ['no' => (int) $element['no'], 'branch' => branchLabel($arrow, 'go')];
+    if ($was !== $edgeId) throw new ApiError(ta('agents.go.decided_other', $vars), 'conflict');
     return ta('agents.go.repeat_decision', $vars);
 }
 
@@ -845,6 +938,8 @@ function goNextLines(array $run): array
     if ($run['state'] === 'done')    return [ta('agents.go.passed') . goTally($runId)];
     if ($run['state'] !== 'running') return [ta('agents.go.run_state', ['state' => $run['state']]) . $run['summary']];
 
+    $ctx = advanceLoad($run);
+    $native = !empty($run['parent_block_id']);
     $lines = [];
     $shown = [];
     $say = static function (array $element, string $what) use (&$lines): void {
@@ -857,7 +952,8 @@ function goNextLines(array $run): array
         [$runId]
     );
     foreach ($open as $step) {
-        $element = dbRow('SELECT * FROM elements WHERE id = ?', [(int) $step['element_id']]);
+        $element = $native ? ($ctx['graph']['nodes'][historyNode($step)] ?? null)
+            : dbRow('SELECT * FROM elements WHERE id = ?', [(int) $step['element_id']]);
         if (!$element) continue;
         $shown[(int) $element['id']] = true;
         /* Имя worker не пишем: работает тот worker, которого позвал leader, —
@@ -886,19 +982,30 @@ function goNextLines(array $run): array
     }
 
     // 2. Готовое, чего движок сам не делает: ромб без решения Jev, шлюз, застрявший блок.
-    $ctx = advanceLoad($run);
     foreach (readyList($run, $ctx['graph'], $ctx['steps']) as $one) {
-        $element = dbRow('SELECT * FROM elements WHERE id = ?', [(int) ($one['id'] ?? 0)]);
+        $element = $ctx['graph']['nodes'][$one['id']] ?? null;
         if (!$element || isset($shown[(int) $element['id']])) continue;
         $no = (int) $element['no'];
-        if ($element['type'] === 'block' && ($why = goStuck($runId, $element)) !== null) {
+        if ($element['type'] === 'block' && ($why = goStuck($runId, $element, $ctx['graph'])) !== null) {
             $say($element, ta('agents.go.stuck'));
             $lines[] = ta('agents.go.stuck_hint', ['why' => $why, 'no' => $no]);
         } elseif ($element['type'] === 'decision') {
             $say($element, ta('agents.go.diamond'));
-            $lines[] = ta('agents.go.diamond_hint', ['no' => $no]);
-            // Исключение из каркаса: без условия и ответа worker ветку не выбрать.
-            $cond = trim((string) runProp((int) $element['id'], 'cond', ''));
+            $id = (int) $element['id'];
+            if (graphBinaryBranches($ctx['graph'], $id)) {
+                $lines[] = ta('agents.go.diamond_hint', ['no' => $no]);
+            } else {
+                $lines[] = branchMessage('unknown');
+                if ($native) $lines[] = "op=done&block=$no&edge=ID";
+                foreach (graphBranches($ctx['graph'], $id) as $edge) {
+                    $lines[] = '  edge=' . ($edge['arrow_id'] ?? $edge['id']) . ' · branch=' . $edge['branch'] . ' · ' . branchLabel($edge, 'go');
+                    $condition = $edge['condition'] ?? null;
+                    if (is_string($condition) && $condition !== '') $lines[] = ta('agents.go.diamond_cond') . $condition;
+                }
+            }
+            // The leader needs the decision text and the previous answers to choose a branch.
+            $cond = trim((string) graphProp($ctx['graph'], $id, 'cond', ''));
+            if ($cond === '' && advanceLeadRun($run)) $cond = runTaskText($ctx['graph'], $id);
             if ($cond !== '') $lines[] = ta('agents.go.diamond_cond') . $cond;
             foreach (goInputs($run, $element, null) as $one) {
                 $lines[] = ta('agents.go.diamond_answer', ['no' => $one['no']]) . $one['result'];
@@ -943,7 +1050,9 @@ function goCatchFiles(array $run, array $element, array $step, string $result): 
     $pieces = array_merge($found[0] ?? [], array_keys(goFilesSaid()));
     if ($work === '' || !$pieces) return [];
 
-    $outputs = (array) runProp((int) $element['id'], 'outputs', []);
+    $native = !empty($run['parent_block_id']);
+    $column = $native ? 'block_id' : 'element_id';
+    $outputs = (array) ($native ? ($element['props']['outputs'] ?? []) : runProp((int) $element['id'], 'outputs', []));
     /* Две последние пометки разрешают сменить обложку живой схемы: это
        сделал принятый шаг этого же прогона, а не человек мимо прогона. */
     $ctx = ['projectId' => (int) $run['project_id'], 'rev' => bumpRev((int) $run['project_id']),
@@ -979,7 +1088,7 @@ function goCatchFiles(array $run, array $element, array $step, string $result): 
         /* Тот же файл в том же виде уже сдал другой блок этого прогона — автор у него есть.
            Иначе секунда запаса выше приписала бы его и блоку, выданному в ту же секунду. */
         if (dbValue("SELECT 1 FROM asset_links l JOIN assets a ON a.id = l.asset_id JOIN run_steps s ON s.id = l.step_id
-                      WHERE l.made_by_run = ? AND l.role = 'result' AND s.element_id <> ? AND a.uri = ? AND a.sha256 = ?
+                      WHERE l.made_by_run = ? AND l.role = 'result' AND s.$column <> ? AND a.uri = ? AND a.sha256 = ?
                       LIMIT 1", [(int) $run['id'], (int) $element['id'], $path, hash_file('sha256', $path)])) continue;
         $taken[$path] = true;
 
@@ -991,7 +1100,7 @@ function goCatchFiles(array $run, array $element, array $step, string $result): 
                    'output' => $output, 'madeByRun' => (int) $run['id']], $ctx);
 
         // Заглавной становится первая картинка: она и видна на холсте.
-        if ($first && fileKindOf($path) === 'image') {
+        if (!$native && $first && fileKindOf($path) === 'image') {
             assetLink(['asset' => $assetId, 'element' => (int) $element['id'], 'role' => 'cover',
                        'output' => $output, 'madeByRun' => (int) $run['id']], $ctx);
             $first = false;
@@ -1099,8 +1208,7 @@ function goTask(): void
         $no = (int) $open[0]['element_no'];
     }
 
-    $element = dbRow('SELECT * FROM elements WHERE project_id = ? AND folder_id = ? AND `no` = ?',
-        [$projectId, (int) $run['folder_id'], $no]);
+    $element = runElement($run, $no);
     if (!$element) plain([ta('agents.go.no_block_lc', ['no' => $no])], 404);
 
     // Числа входа берём у открытой попытки, а если её нет — по жетонам.
@@ -1119,16 +1227,20 @@ function goTask(): void
     // &who= — кому ведущий отдал блок (субагент): записываем у шага и у уже взятого.
     $who = trim((string) (input('who') ?? ''));
     if ($step && ($step['state'] === 'issued' || $who !== '')) goStepRunning($projectId, $runId, $step, $who);
-    if ($step && $step['state'] === 'issued') goKeepTries($run, $step);
+    if (empty($run['parent_block_id']) && $step && $step['state'] === 'issued') goKeepTries($run, $step);
 
     /* Прогон leader чисел из ответов не разбирает: «кадр 2832 × 4240» и «a
        равно двум» worker и Jev поймут сами, а разбор ошибался молча. Вход —
        только дословные ответы прошлых блоков. */
     if (advanceLeadRun($run)) $vars = [];
+    if (!empty($run['parent_block_id']) && $step && !goStepSelf($step) && !input('text')) {
+        $url = runBaseUrl() . '?' . http_build_query(['op' => 'step.get', 'run' => $runId, 'step' => (int) $step['id']]);
+        plain([ta('agents.go.task_link') . $url, instrNativeWorker($runId, (int) $step['id'])]);
+    }
     $text = goTaskText($element, $vars, goInputs($run, $element, $step), runWorkShown($run),
-        $step ? goAddress($step) : '', runOutShown($run), goSpent($runId), $run);
+        $step ? goAddress($step) : '', runOutShown($run), empty($run['parent_block_id']) ? goSpent($runId) : 0, $run);
     // Общая картина схемы (галочка в свойствах папки) — строкой со ссылкой, сразу под шапкой.
-    $scheme = $step ? goSchemeFile($run) : null;
+    $scheme = $step && empty($run['parent_block_id']) ? goSchemeFile($run) : null;
     if ($scheme !== null) {
         array_splice($text, 1, 0, [ta('agents.go.scheme_file') . goTextUrl($project, $run, 'scheme')]);
     }
@@ -1141,7 +1253,7 @@ function goTask(): void
        хоть с другого компьютера. Сам текст — &text=1, для человека и проверок.
        Блок делает сам ведущий (lead_self: solo или нет worker) — пересылать некому:
        текст сразу, без второго запроса по ссылке. (&file=1 из прежних инструкций ничего не меняет.) */
-    if (input('text') || ($step && goStepSelf($step))) {
+    if (!empty($run['parent_block_id']) || input('text') || ($step && goStepSelf($step))) {
         if ($step) goTaskLog($step, $text, ta('agents.go.as_text'));
         plain($text);
     }
@@ -1169,12 +1281,13 @@ function goText(): void
     $run = goRun((int) $project['id']);
     $task = trim((string) (input('task') ?? ''));
     $name = match (true) {
-        $task === 'scheme' => 'схема.txt',
+        $task === 'scheme' => 'scheme.txt',
         $task === 'worker' => 'worker.md',
         (bool) preg_match('/^\d+\.\d+$/', $task) => $task . '.txt',
         default => '',
     };
     $file = runServiceDir((int) $run['id']) . '/tasks/r' . (int) $run['no'] . '/' . $name;
+    if ($task === 'scheme' && !is_file($file)) $file = dirname($file) . '/схема.txt';
     if ($name === '' || !is_file($file)) plain([ta('agents.go.no_text', ['task' => $task])], 404);
     plain(explode("\n", rtrim((string) file_get_contents($file), "\n")));
 }
@@ -1261,7 +1374,7 @@ function goTaskFile(array $run, array $step, array $text): string
 {
     $file = goTasksDir($run) . '/' . goAddress($step) . '.txt';
     if (@file_put_contents($file, implode("\n", $text) . "\n") === false) {
-        throw new RuntimeException('Не удалось записать задание: ' . $file);
+        throw new RuntimeException('Could not save the task: ' . $file);
     }
     return $file;
 }
@@ -1271,7 +1384,7 @@ function goTasksDir(array $run): string
 {
     $dir = serviceDirMake(runServiceDir((int) $run['id'])) . '/tasks/r' . (int) $run['no'];
     if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
-        throw new RuntimeException('Не удалось завести папку заданий: ' . $dir);
+        throw new RuntimeException('Could not create the task folder: ' . $dir);
     }
     return $dir;
 }
@@ -1289,7 +1402,7 @@ function goSchemeFile(array $run): ?string
     $folder = dbRow('SELECT id, name, share_scheme FROM folders WHERE id = ?', [(int) $run['folder_id']]);
     if (!$folder || (int) $folder['share_scheme'] !== 1) return null;
 
-    $file = goTasksDir($run) . '/схема.txt';
+    $file = goTasksDir($run) . '/scheme.txt';
     $text = array_merge([
         ta('agents.go.scheme_file_head', ['name' => $folder['name']]),
         ta('agents.go.scheme_file_note'),
@@ -1297,7 +1410,7 @@ function goSchemeFile(array $run): ?string
         '',
     ], goSchemeMap((int) $folder['id']));
     if (!is_file($file) && @file_put_contents($file, implode("\n", $text) . "\n") === false) {
-        throw new RuntimeException('Не удалось записать общую картину: ' . $file);
+        throw new RuntimeException('Could not save the scheme overview: ' . $file);
     }
     return $file;
 }
@@ -1308,23 +1421,17 @@ function goSchemeFile(array $run): ?string
  *   ◆77 да → ▣78 Искать лицо → ◆79 Лицо есть?
  * Ветки ромба — своими строками; уже показанный узел — коротко, номером (▣76).
  */
-function goSchemeMap(int $folderId): array
+function goSchemeMap(int $folderId, ?array $graph = null): array
 {
-    $nodes = [];
-    foreach (dbAll("SELECT id, `no`, type, title FROM elements
-                     WHERE folder_id = ? AND type IN ('block','decision','gateway') ORDER BY `no`", [$folderId]) as $row) {
-        $nodes[(int) $row['id']] = $row;
-    }
-    $starters = array_map(static fn(array $one) => (int) $one['id'], folderStarters($folderId));
-
-    // Выходы узлов: у ромба «да» раньше «нет».
+    $graph ??= engineGraph($folderId);
+    $nodes = $graph['nodes'];
+    uasort($nodes, static fn(array $a, array $b): int => $a['no'] <=> $b['no']);
+    $starters = array_keys(array_filter($nodes, static fn(array $node): bool =>
+        $node['type'] === 'block' && ($node['props']['start'] ?? false)));
+    $arrows = $graph['edges'];
+    uasort($arrows, static fn(array $a, array $b): int => [$a['branch'] === 'no', $a['no'] ?? $a['id']] <=> [$b['branch'] === 'no', $b['no'] ?? $b['id']]);
     $outs = [];
-    foreach (dbAll("SELECT from_id, to_id, branch, title FROM elements
-                     WHERE folder_id = ? AND type = 'arrow' ORDER BY branch = 'no', `no`", [$folderId]) as $arrow) {
-        if (isset($nodes[(int) $arrow['from_id']], $nodes[(int) $arrow['to_id']])) {
-            $outs[(int) $arrow['from_id']][] = $arrow;
-        }
-    }
+    foreach ($arrows as $arrow) $outs[(int) $arrow['from_id']][] = $arrow;
 
     $short = static function (int $id) use ($nodes, $starters): string {
         $icon = in_array($id, $starters, true) ? '◯'
@@ -1338,7 +1445,7 @@ function goSchemeMap(int $folderId): array
     $seen = [];
 
     // Цепочка идёт, пока у узла один выход; на развилке — ветки своими строками.
-    $walk = function (int $id, string $head) use (&$walk, &$seen, &$lines, $nodes, $outs, $short, $full): void {
+    $walk = function (int $id, string $head) use (&$walk, &$seen, &$lines, $nodes, $outs, $short, $full, $graph): void {
         $chain = $head !== '' ? [$head] : [];
         $cur = $id;
         $fork = false;
@@ -1354,12 +1461,19 @@ function goSchemeMap(int $folderId): array
         $lines[] = implode(' → ', $chain);
         if (!$fork) return;
         foreach ($outs[$cur] as $arrow) {
-            $word = in_array((string) $arrow['branch'], ['yes', 'no'], true) ? ta('agents.go.branch.' . $arrow['branch']) : trim((string) $arrow['title']);
+            $word = trim((string) $arrow['title']);
+            if ($nodes[$cur]['type'] === 'decision') {
+                if (graphBinaryBranches($graph, $cur) && in_array($arrow['branch'], ['yes', 'no'], true)) {
+                    $word = ta('agents.go.branch.' . $arrow['branch']);
+                } elseif (!empty($graph['modern'])) {
+                    $word = branchLabel($arrow, 'go') . ' [' . $arrow['branch'] . ']';
+                }
+            }
             $walk((int) $arrow['to_id'], $short($cur) . ($word !== '' ? ' ' . $word : ''));
         }
     };
 
-    $entries = $starters ?: array_map(static fn(array $one) => (int) $one['id'], runEntriesByArrows($folderId));
+    $entries = $starters ?: graphEntries($graph);
     foreach ($entries as $id) if (isset($nodes[$id]) && !isset($seen[$id])) $walk($id, '');
     // Узлы, до которых от входа не дойти, — тоже в картину.
     foreach (array_keys($nodes) as $id) if (!isset($seen[$id])) $walk($id, '');
@@ -1469,6 +1583,9 @@ function goInvite(): void
 {
     $project = requireProject(false);
     $run = goRun((int) $project['id']);
+    if (!empty($run['parent_block_id'])) {
+        plain([instrNativeWorker((int) $run['id'])]);
+    }
     $folder = folderRow((int) $run['folder_id'], (int) $project['id']);
     if (instrScenario($folder)['solo']) {
         throw new ApiError(ta('agents.go.solo_no_invite'), 'conflict');
@@ -1510,7 +1627,7 @@ function goWorkerFile(array $run, array $folder, bool $fresh = false): ?string
     if (instrScenario($folder)['solo']) return null;
     $file = goTasksDir($run) . '/worker.md';
     if (($fresh || !is_file($file)) && @file_put_contents($file, workerDoc($folder, $run)) === false) {
-        throw new RuntimeException('Не удалось записать инструкцию worker: ' . $file);
+        throw new RuntimeException('Could not save worker instructions: ' . $file);
     }
     return $file;
 }
@@ -1521,6 +1638,7 @@ function goWorkerFile(array $run, array $folder, bool $fresh = false): ?string
  */
 function goSelf(array $run, array $step): bool
 {
+    if (!empty($run['parent_block_id'])) return empty($step['agent_id']);
     $folder = dbRow('SELECT role_scheme, run_env FROM folders WHERE id = ?', [(int) $run['folder_id']]);
     if (!$folder) return false;
     $s = instrScenario($folder);
@@ -1553,7 +1671,7 @@ function goBrief(array $run): string
 {
     $runId = (int) $run['id'];
     $open = dbAll(
-        "SELECT s.element_no, s.state, s.agent_id, e.title FROM run_steps s
+        "SELECT s.element_no, s.state, s.agent_id, COALESCE(e.title, s.element_title) AS title FROM run_steps s
            LEFT JOIN elements e ON e.id = s.element_id
           WHERE s.run_id = ? AND s.state IN ('issued','running','submitted') ORDER BY s.id",
         [$runId]);
@@ -1565,7 +1683,7 @@ function goBrief(array $run): string
     // Самый хоженый блок и есть число кругов цикла.
     $laps = (int) dbValue(
         "SELECT MAX(n) FROM (SELECT COUNT(*) n FROM run_steps
-          WHERE run_id = ? AND state = 'accepted' GROUP BY element_id) t", [$runId]);
+          WHERE run_id = ? AND state = 'accepted' GROUP BY COALESCE(block_id, element_id)) t", [$runId]);
 
     return ($laps > 1 ? ta('agents.go.brief_laps') . $laps : '')
         . ($now ? ta('agents.go.brief_now') . implode(', ', $now) : '');
@@ -1606,16 +1724,15 @@ function goStop(): void
     $run = goRun($projectId);
     $runId = (int) $run['id'];
 
-    // Закрытый прогон не трогаем: пройденный не должен стать «остановленным».
-    if (!in_array($run['state'], ['running', 'paused'], true)) {
-        plain([ta('agents.go.already_closed', ['no' => (int) $run['no'], 'state' => $run['state']])]);
-    }
-
-    engineLocked($projectId, static function () use ($run): array {
+    $message = engineLocked($projectId, static function () use ($runId, $projectId): string {
+        $run = runRow($runId, $projectId);
+        if (!in_array($run['state'], ['running', 'paused'], true)) {
+            return ta('agents.go.already_closed', ['no' => (int) $run['no'], 'state' => $run['state']]);
+        }
         runStopDo($run, 'lead', ta('agents.go.stop_why'), ta('agents.go.stop_summary'));
-        return [];
+        return ta('agents.go.stopped', ['no' => (int) $run['no']]);
     });
-    plain([ta('agents.go.stopped', ['no' => (int) $run['no']])]);
+    plain([$message]);
 }
 
 /**

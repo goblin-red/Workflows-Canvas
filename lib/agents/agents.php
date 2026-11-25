@@ -158,25 +158,36 @@ function agentToken(): void
 {
     $project = requireProject(true);
     $projectId = (int) $project['id'];
-    $agent = agentRow((int) (input('id') ?? input('agent') ?? 0), $projectId);
-    if ($agent['role'] !== 'worker') throw new ApiError(t('server.agent.token_worker_only'));
+    $block = input('block');
+    if ($block !== null) {
+        requireOwner($project);
+        if (input('id') !== null || input('agent') !== null) throw new ApiError('Specify block or id');
+    }
 
-    /* Прежние пропуска этого агента живут дальше: один агент работает сразу
-       в нескольких прогонах, и выдача второго пропуска не должна обрывать
-       первого worker посреди шага. Погасить старые просит `renew`. */
-    if (!empty(input('renew'))) tokenRevokeFor('agent_id', (int) $agent['id']);
+    $issue = static function () use ($project, $projectId, $block): array {
+        $agent = $block === null
+            ? agentRow((int) (input('id') ?? input('agent') ?? 0), $projectId)
+            : nativeWorkerAccount($projectId, graphId($block));
+        if ($agent['role'] !== 'worker') throw new ApiError(t('server.agent.token_worker_only'));
 
-    $token = tokenIssue('agent', [
-        'project_id' => $projectId,
-        'agent_id'   => (int) $agent['id'],
-    ], t('server.token.agent_label', ['name' => $agent['name']]));
+        // Блокировка прежнего пропуска требуется только по явному renew.
+        if (!empty(input('renew'))) tokenRevokeFor('agent_id', (int) $agent['id']);
 
-    reply([
-        'agent' => agentShape($agent),
-        'token' => $token['secret'],
-        'howto' => sprintf('GOBLIN_URL=%s GOBLIN_PROJECT=%s GOBLIN_AGENT=%s goblin work',
-            runBaseUrl(), $project['url_key'], $token['secret']),
-    ]);
+        $token = tokenIssue('agent', [
+            'project_id' => $projectId, 'agent_id' => (int) $agent['id'],
+        ], t('server.token.agent_label', ['name' => $agent['name']]));
+
+        $out = [
+            'agent' => agentShape($agent),
+            'token' => $token['secret'],
+            'howto' => sprintf('GOBLIN_URL=%s GOBLIN_PROJECT=%s GOBLIN_AGENT=%s goblin work',
+                runBaseUrl(), $project['url_key'], $token['secret']),
+        ];
+        if ($block !== null) $out['agent']['block'] = graphId($block);
+        return $out;
+    };
+
+    reply($block === null ? $issue() : engineLocked($projectId, $issue));
 }
 
 /** Значение должно быть в списке config.txt, иначе человек не поймёт, что выбрал. */

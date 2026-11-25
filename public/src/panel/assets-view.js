@@ -166,7 +166,7 @@ export function assetGallery(list, redraw, folder = null, groups = null) {
       button.classList.toggle('on', active);
       button.setAttribute('aria-pressed', String(active));
     }
-    const compare = (a, b) => String(a || '').localeCompare(String(b || ''), 'ru', { numeric: true, sensitivity: 'base' });
+    const compare = (a, b) => String(a || '').localeCompare(String(b || ''), 'en', { numeric: true, sensitivity: 'base' });
     ordered = [...list].sort((a, b) => {
       let result = choice.sort === 'date' ? compare(b.createdAt, a.createdAt)
         : choice.sort === 'kind' ? compare(a.kind, b.kind) : compare(a.title || a.name, b.title || b.name);

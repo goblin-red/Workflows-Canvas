@@ -13,4 +13,9 @@ if (installNeeded()) {
     exit;
 }
 
+if (!empty(config()['graph_editor'])) {
+    require __DIR__ . '/graph.php';
+    return;
+}
+
 renderEditor(isset($_GET['view']));

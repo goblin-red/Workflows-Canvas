@@ -313,8 +313,8 @@ function settingsWriteOpen(array $open): void
     }
     if (!$saved && !is_file($file)) return;       // отличий нет — файл не заводим
     $text = "<?php\n"
-        . "/* Настройки установки, заданные в админке («Настройки»). Файл пишет админка — руками не править:\n"
-        . "   руками правят config.php. Лежит поверх него; ключи и пароли — в secrets.php, окружение сильнее. */\n\n"
+        . "/* Installation settings saved by the admin panel. Edit them there:\n"
+        . "   edit config.php for base settings. Store secrets in secrets.php. Environment variables take precedence. */\n\n"
         . "declare(strict_types=1);\n\n"
         . 'return ' . var_export($saved, true) . ";\n";
     settingsWriteFile($file, $text);

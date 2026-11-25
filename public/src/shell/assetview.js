@@ -38,7 +38,7 @@ export function assetIcon(kind) {
  * Файл у агента в вебе (agent) — из подключённой папки схемы; не подключена — null.
  */
 export function assetUrl(asset) {
-  if (!asset) return null;
+  if (!asset || asset.missing) return null;
   if (asset.agent && asset.uri) return state.folder ? localUrl(state.folder.id, asset.uri) : null;
   if (asset.uri && /^https?:/i.test(asset.uri)) return asset.uri;
   const id = asset.asset || asset.id;
@@ -210,20 +210,31 @@ export async function openAsset(asset, element, list = null) {
     await replaceFile(full, element, file);
   });
 
-  // Адрес виден всегда: у ссылки его правят, у загруженного файла это адрес,
-  // по которому сервер отдаёт байты, — его только читают и копируют.
+  // У внешнего адреса есть редактируемое поле. Для серверного файла
+  // показываем ссылку на байты, пригодную для копирования из диалога.
   let uri = null;
-  const address = full.uri || assetUrl(full) || '';
+  const open = assetUrl(full);
+  const external = full.uri && !full.file && !full.agent && !full.uri.startsWith('/');
+  const serverFile = open && !full.agent && (full.file || full.uri?.startsWith('/'));
+  const address = external ? full.uri : serverFile ? new URL(open, document.baseURI).href : '';
   if (address) {
     uri = document.createElement('input');
     uri.className = 'input';
     uri.value = address;
-    uri.readOnly = !full.uri || !!full.file;
+    uri.readOnly = !external;
     uri.style.flex = '1';
     const line = document.createElement('div');
     line.className = 'row';
     line.append(uri, swap);
     view.append(wrapField(uri.readOnly ? t('editor.asset.where_server') : t('editor.asset.where'), line));
+  }
+  if (full.agent && open) {
+    const note = document.createElement('p');
+    note.className = 'muted';
+    note.textContent = t('editor.asset.local_only');
+    view.append(note);
+  } else if (isText(full) && (full.missing || full.agent)) {
+    view.append(preview(full));
   }
 
   const close = () => dialog.close();
@@ -254,7 +265,6 @@ export async function openAsset(asset, element, list = null) {
   );
 
   if (cover) foot.prepend(cover);
-  const open = assetUrl(full);
   if (open) foot.prepend(link(t('editor.asset.open_separately'), open));
 
   const index = list.findIndex((item) => Number(item.asset || item.id) === Number(asset.asset || asset.id));
@@ -357,7 +367,7 @@ export function openWorkfile(file, rel, url, folderId, onChange) {
 
   const where = document.createElement('input');
   where.className = 'input';
-  where.value = file.path;
+  where.value = new URL(url, document.baseURI).href;
   where.readOnly = true;
   view.append(wrapField(t('editor.asset.where_server'), where));
 

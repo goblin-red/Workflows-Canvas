@@ -41,10 +41,10 @@ function timelineShape(array $run): array
 {
     $runId = (int) $run['id'];
     $now = dbNow();
-    $folder = dbRow('SELECT * FROM folders WHERE id = ?', [(int) $run['folder_id']]) ?: [];
-    $graph = engineGraph((int) $run['folder_id']);
+    $graph = runScene($run);
+    $folder = $graph['settings'] ?? dbRow('SELECT * FROM folders WHERE id = ?', [(int) $run['folder_id']]) ?? [];
     $steps = dbAll(
-        'SELECT s.*, e.type FROM run_steps s LEFT JOIN elements e ON e.id = s.element_id
+        'SELECT s.*, COALESCE(s.block_kind, e.type) AS type FROM run_steps s LEFT JOIN elements e ON e.id = s.element_id
           WHERE s.run_id = ? ORDER BY s.opened_at, s.id', [$runId]);
     $events = dbAll(
         'SELECT id, step_id, element_no, kind, actor, at, title, meta FROM run_events
@@ -57,21 +57,83 @@ function timelineShape(array $run): array
     $lifeFrom = $resets ? (string) end($resets)['at'] : (string) $run['started_at'];
     $bars = timelineBars($run, $folder, $graph, $steps, $events, $ready, $lifeFrom);
 
+    $location = empty($run['parent_block_id']) ? ['folder' => (int) $run['folder_id']] : ['folder' => null, 'parent' => (int) $run['parent_block_id']];
     return [
         'run' => [
             'id' => $runId, 'no' => (int) $run['no'], 'label' => 'r' . (int) $run['no'],
             'state' => (string) $run['state'], 'epoch' => count($resets), 'version' => (int) $run['version'],
             'started' => $run['started_at'], 'finished' => $run['finished_at'],
-            'lifeFrom' => $lifeFrom, 'now' => $now, 'folder' => (int) $run['folder_id'],
+            'lifeFrom' => $lifeFrom, 'now' => $now,
             'roleScheme' => (string) ($folder['role_scheme'] ?? 'solo'),
             'runEnv' => $folder ? folderActiveRunEnv($folder) : '',
             'showPause' => (float) $run['show_pause'],
-        ],
+        ] + $location,
         'lanes' => timelineLanes($run, $bars),
         'bars'  => $bars,
+        'progress' => timelineProgress($run, $graph, $steps, $lifeFrom),
+        'files' => timelineResultFiles($runId),
         'waits' => timelineWaits($run, $graph, $steps, $bars, $marks, $ready, $lifeFrom, $now),
         'marks' => $marks,
     ];
+}
+
+/** Стартер открывает прогон. В процентах учитываются остальные блоки и их последние попытки. */
+function timelineProgress(array $run, array $graph, array $steps, string $lifeFrom): array
+{
+    $latest = [];
+    foreach ($steps as $step) {
+        $node = historyNode($step);
+        if ($node !== null && $step['opened_at'] >= $lifeFrom) $latest[$node] = $step;
+    }
+    $accepted = array_filter($latest, static fn(array $step): bool => $step['state'] === 'accepted');
+    $starter = graphStarter($graph);
+    unset($accepted[$starter]);
+
+    // До решения ромба учитываем доступные ветки. После решения идём по выбранной.
+    $reachable = [];
+    $queue = graphEntries($graph);
+    while ($queue) {
+        $node = array_pop($queue);
+        if (isset($reachable[$node])) continue;
+        $reachable[$node] = true;
+        $chosen = isset($accepted[$node]) ? historyChosen($accepted[$node]) : null;
+        foreach (graphOut($graph, $node) as $edge) {
+            if ($chosen === null || $chosen === (int) $edge) $queue[] = (int) $graph['edges'][$edge]['to_id'];
+        }
+    }
+    unset($reachable[$starter]);
+    $done = count($accepted);
+    $finished = $run['state'] === 'done';
+    $total = $finished ? $done : count($reachable + $accepted);
+    return ['done' => $done, 'total' => $total, 'percent' => $finished ? 100 : ($total ? (int) floor(100 * $done / $total) : 0)];
+}
+
+/** Возвращаем имя и ID файла в истории, без пути на диске сервера. */
+function timelineResultFiles(int $runId): array
+{
+    $rows = dbAll(
+        "SELECT l.step_id, a.id, a.title, a.kind, a.uri, a.file_key, a.original_name
+           FROM asset_links l JOIN run_steps s ON s.id = l.step_id
+           JOIN assets a ON a.id = l.asset_id AND a.project_id = s.project_id
+          WHERE s.run_id = ? AND l.role = 'result' ORDER BY l.id",
+        [$runId]
+    );
+    $byStep = [];
+    foreach ($rows as $row) {
+        $uri = (string) $row['uri'];
+        $name = $row['original_name'] ?: ($row['title'] ?: 'File');
+        $file = ['name' => $name];
+        if ($row['file_key'] !== null || (str_starts_with($uri, '/') && is_file($uri))) {
+            $file['asset'] = (int) $row['id'];
+            $file['image'] = $row['kind'] === 'image';
+        } elseif (preg_match('~^https?://~i', $uri)) {
+            $file['url'] = $uri;
+        } else {
+            $file['agent'] = assetAtAgentUri($row['file_key'], $uri);
+        }
+        $byStep[(int) $row['step_id']][] = $file;
+    }
+    return $byStep;
 }
 
 /* ── Отрезки ──────────────────────────────────────────────────── */
@@ -108,10 +170,14 @@ function timelineBars(array $run, array $folder, array $graph, array $steps, arr
             // Ромб на входе схемы жетона не брал — готов с начала жизни прогона.
             $bar['from'] = $readyAt[$id] ?? $lifeFrom;
             $bar['branch'] = timelineBranch($fact, $graph, $s);
+            if (!empty($s['block_id'])) {
+                $bar['chosen'] = historyChosen($s);
+                $bar['branchLabel'] = $fact['meta']['label'] ?? $bar['branch'];
+            }
             $bar['confidence'] = ($fact['actor'] ?? '') === 'judge' ? timelineConfidence($fact['said'] ?? []) : null;
         }
         if ($kind === 'pass') {
-            $target = (int) ($fact['meta']['target_folder'] ?? $graph['nodes'][(int) $s['element_id']]['target_folder_id'] ?? 0);
+            $target = (int) ($fact['meta']['target_parent'] ?? $fact['meta']['target_folder'] ?? $graph['nodes'][(int) historyNode($s)]['target_folder_id'] ?? 0);
             $bar['target'] = $target ?: null;
         }
         $bars[] = $bar;
@@ -168,7 +234,7 @@ function timelineKind(array $s, array $fact, array $graph): string
         default => match (true) {
             $s['type'] === 'decision' => 'decision',
             $s['type'] === 'gateway'  => 'pass',
-            $s['element_id'] !== null && (int) $s['element_id'] === graphStarter($graph) => 'start',
+            historyNode($s) !== null && (int) historyNode($s) === graphStarter($graph) => 'start',
             default => 'work',
         },
     };
@@ -192,7 +258,7 @@ function timelineBar(string $kind, string $lane, array $s, int $lap): array
     return [
         'kind' => $kind, 'lane' => $lane,
         'step' => $s['id'] !== null ? (int) $s['id'] : null,
-        'element' => $s['element_id'] !== null ? (int) $s['element_id'] : null,
+        'element' => historyNode($s) !== null ? (int) historyNode($s) : null,
         'no' => (int) $s['element_no'], 'title' => (string) $s['element_title'],
         'address' => $s['attempt'] !== null ? $s['element_no'] . '.' . $s['attempt'] : null,
         'attempt' => $s['attempt'] !== null ? (int) $s['attempt'] : null,
@@ -233,8 +299,8 @@ function timelineReadyAt(int $runId): array
 function timelineFreeAt(int $runId, ?int $edgeId): ?string
 {
     if ($edgeId === null) return null;
-    $at = dbValue('SELECT MAX(created_at) FROM run_marks WHERE run_id = ? AND edge_id = ? AND taken_by_step_id IS NULL',
-        [$runId, $edgeId]);
+    $at = dbValue('SELECT MAX(created_at) FROM run_marks WHERE run_id = ? AND (arrow_id = ? OR edge_id = ?) AND taken_by_step_id IS NULL',
+        [$runId, $edgeId, $edgeId]);
     return $at ? (string) $at : null;
 }
 
@@ -245,12 +311,12 @@ function timelineFreeAt(int $runId, ?int $edgeId): ?string
 function timelineBranch(array $fact, array $graph, array $step): ?string
 {
     $branch = (string) ($fact['meta']['branch'] ?? '');
-    if (in_array($branch, ['yes', 'no'], true)) return $branch;
+    if ($branch !== '') return $branch;
     if (preg_match('/→\s*(да|нет|yes|no)\b/u', (string) ($fact['title'] ?? ''), $m)) {
         return in_array($m[1], ['да', 'yes'], true) ? 'yes' : 'no';
     }
-    $edge = (string) ($graph['edges'][(int) ($step['chosen_edge_id'] ?? 0)]['branch'] ?? '');
-    return in_array($edge, ['yes', 'no'], true) ? $edge : null;
+    $edge = (string) ($graph['edges'][(int) historyChosen($step)]['branch'] ?? '');
+    return $edge !== '' ? $edge : null;
 }
 
 /** Уверенность Jev 0…1: из ответа (meta.confidence), у старых событий — из подсказки «Jev: да 0,93». */
@@ -514,7 +580,7 @@ function runReport(): void
     /* Тип элемента нужен для отметки «слишком быстро»: ромб и шлюз решает код,
        и доли секунды там — норма, а не повод присматриваться. */
     $steps = dbAll(
-        'SELECT s.*, e.type FROM run_steps s
+        'SELECT s.*, COALESCE(s.block_kind, e.type) AS type FROM run_steps s
       LEFT JOIN elements e ON e.id = s.element_id
           WHERE s.run_id = ? ORDER BY s.id',
         [$run['id']]

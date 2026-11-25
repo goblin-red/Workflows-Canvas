@@ -4,7 +4,7 @@
    Не делает: не зовёт модель.
 
    Маркер в файле: <!-- rule:assistant -->. Общие навыки и режимы — deepseek.md, рисование —
-   рисование.md (rule:drawing … rule:end), конструктор — конструктор.md (rule:constructor … rule:end)
+   drawing.md (rule:drawing … rule:end), конструктор — builder.md (rule:constructor … rule:end)
    плюс «Опыт каталога» из паспортов (catalogDigest, lib/templates/catalog.php).
    Файлы лежат по языкам: instructions/ru/, instructions/en/ — берётся язык проекта (langAgents). */
 
@@ -17,12 +17,12 @@ function aiRules(string $section): string
     $dir = config()['instructions_dir'];
     $file = static fn(string $name) => langFile($dir, $name, langAgents());
     $out = aiSection($file('deepseek.md'), 'common');
-    // Конструктору — его метод (конструктор.md) и опыт каталога из паспортов; прочим — раздел режима.
+    // Конструктору — его метод (builder.md) и опыт каталога из паспортов; прочим — раздел режима.
     $out .= "\n\n" . ($section === 'constructor'
-        ? aiSection($file('конструктор.md'), 'constructor') . "\n\n" . catalogDigest()
+        ? aiSection($file('builder.md'), 'constructor') . "\n\n" . catalogDigest()
         : aiSection($file('deepseek.md'), $section));
     if (in_array($section, ['constructor', 'assistant'], true)) {
-        $out .= "\n\n" . aiSection($file('рисование.md'), 'drawing');
+        $out .= "\n\n" . aiSection($file('drawing.md'), 'drawing');
     }
     return trim($out);
 }

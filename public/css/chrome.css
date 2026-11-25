@@ -314,14 +314,14 @@ body[data-look="mobile"] .folders-hint{display:none}
   animation:run-live 1.6s ease-in-out infinite}
 .tile.live{border-color:color-mix(in srgb,var(--ok) 55%,transparent)}
 @keyframes run-live{0%,100%{opacity:1}50%{opacity:.45}}
-/* Приветствие гостя (shell/welcome.js): картинка, пара строк и два пути — пустой холст или каталог. */
+/* Приветствие гостя (shell/welcome.js): пустой холст, каталог и краткое руководство. */
 .welcome-dialog{width:min(560px,94vw);padding:22px 22px 20px;text-align:center}
 .welcome-art{display:block;width:min(380px,82%);height:auto;margin:0 auto 4px}
 .welcome-title{margin-bottom:6px}
 .welcome-text{max-width:430px;margin:0 auto 18px;color:var(--ink-dim);line-height:1.5}
-.welcome-choices{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.welcome-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .welcome-choice{display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 12px;
-  border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface-2);color:var(--ink);cursor:pointer}
+  border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface-2);color:var(--ink);cursor:pointer;text-decoration:none}
 .welcome-choice:hover,.welcome-choice:focus-visible{border-color:var(--accent);outline:none}
 .welcome-choice svg{width:26px;height:26px;fill:none;stroke:var(--accent);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .welcome-choice b{font-size:var(--f-md)}

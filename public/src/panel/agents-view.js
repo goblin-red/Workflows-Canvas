@@ -184,7 +184,7 @@ function watchCounts() {
 function order(a, b) {
   // По блокам — сначала самые занятые: видно, кто тянет схему.
   if (sort === 'used') return agentUsed(b) - agentUsed(a) || a.name.localeCompare(b.name);
-  if (sort === 'cli') return (a.cli || 'яя').localeCompare(b.cli || 'яя') || a.name.localeCompare(b.name);
+  if (sort === 'cli') return (a.cli || '￿').localeCompare(b.cli || '￿') || a.name.localeCompare(b.name);
   if (sort === 'new') return String(b.created || '').localeCompare(String(a.created || ''));
   return a.name.localeCompare(b.name);
 }

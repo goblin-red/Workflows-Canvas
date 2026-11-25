@@ -173,7 +173,7 @@ function runStateShape(array $project, array $run, bool $full): array
     $forLead = callerRole() !== 'worker';
     // Граф папки грузим один раз: он нужен и списку «можно открыть», и ходу, и разбору сдачи.
     $graph = advanceOn($run) && in_array($run['state'], ['running', 'paused'], true)
-        ? engineGraph((int) $run['folder_id']) : null;
+        ? runScene($run) : null;
 
     $open = [];
     foreach ($steps as $step) {
@@ -186,10 +186,11 @@ function runStateShape(array $project, array $run, bool $full): array
             'agent'   => $step['agent_id'] ? (int) $step['agent_id'] : null,
             'title'   => (string) $step['element_title'],
         ];
+        if (!empty($step['block_id'])) $one['block'] = (int) $step['block_id'];
         if ($step['state'] === 'submitted') {
             $one['result'] = (string) $step['result'];
             if ($forLead) {
-                $graph ??= engineGraph((int) $run['folder_id']);
+                $graph ??= runScene($run);
                 $one['review'] = stepReview($project, $run, $step, $graph);
             }
         }
@@ -211,17 +212,17 @@ function runStateShape(array $project, array $run, bool $full): array
     if ($full) {
         // Исполнитель — тот же ответ, что у ленты времени (stepExecutor): панель шага своего правила не держит.
         $names = stepAgentNames($steps);
-        $leadNow = stepLeadNow(dbRow('SELECT role_scheme, run_env FROM folders WHERE id = ?', [(int) $run['folder_id']]) ?: []);
+        $leadNow = stepLeadNow($graph['settings'] ?? dbRow('SELECT role_scheme, run_env FROM folders WHERE id = ?', [(int) $run['folder_id']]) ?? []);
         $out['steps'] = array_map(static fn(array $s) => [
             'id'      => (int) $s['id'],
             'no'      => (int) $s['element_no'],
             'attempt' => (int) $s['attempt'],
             'state'   => (string) $s['state'],
             'result'  => $s['result'] !== null ? (string) $s['result'] : null,
-            'via'     => $s['via_edge_id'] ? (int) $s['via_edge_id'] : null,
-            'chosen'  => $s['chosen_edge_id'] ? (int) $s['chosen_edge_id'] : null,
+            'via'     => historyVia($s),
+            'chosen'  => historyChosen($s),
             'executor' => stepExecutor($s, $names, $leadNow),
-        ] + (($s['who'] ?? '') !== '' ? ['who' => (string) $s['who']] : []), $steps);
+        ] + (!empty($s['block_id']) ? ['block' => (int) $s['block_id']] : []) + (($s['who'] ?? '') !== '' ? ['who' => (string) $s['who']] : []), $steps);
     }
     return $out;
 }
@@ -233,8 +234,8 @@ function runStateShape(array $project, array $run, bool $full): array
  */
 function stepReview(array $project, array $run, array $step, array $graph): array
 {
-    $elementId = (int) $step['element_id'];
-    $spec = $elementId ? specText('element_id', $elementId) : null;
+    $elementId = (int) historyNode($step);
+    $spec = $elementId ? runTaskSpec($graph, $elementId) : null;
 
     $files = dbAll(
         "SELECT a.title, a.uri, l.output FROM asset_links l JOIN assets a ON a.id = l.asset_id

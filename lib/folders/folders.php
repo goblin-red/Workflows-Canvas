@@ -14,9 +14,9 @@ declare(strict_types=1);
  * сервер собирает инструкции агентов (lib/api/instructions.php).
  */
 const RUN_ENVS = [
-    'subagents'   => ['title' => 'Субагенты — внутри leader'],
-    'orca'        => ['title' => 'Орка — отдельные терминалы'],
-    'sendmessage' => ['title' => 'SendMessage — сессии Claude'],
+    'subagents'   => ['title' => 'Subagents within the leader session'],
+    'orca'        => ['title' => 'Orca in separate terminals'],
+    'sendmessage' => ['title' => 'SendMessage in Claude sessions'],
 ];
 
 /**
@@ -56,10 +56,10 @@ function folderRunEnv($value): string
  * ещё нет: выбрать можно, в списке помечена «(позже)».
  */
 const ROLE_SCHEMES = [
-    'solo'                 => ['title' => 'Ведущий делает всё сам'],
-    'leader-worker'        => ['title' => 'Ведущий — воркер'],
-    'consult-worker'       => ['title' => 'Ведущий — консультант — воркер', 'soon' => true],
-    'consult-audit-worker' => ['title' => 'Ведущий — консультант — аудитор — воркер', 'soon' => true],
+    'solo'                 => ['title' => 'Leader works alone'],
+    'leader-worker'        => ['title' => 'Leader and worker'],
+    'consult-worker'       => ['title' => 'Leader, consultant and worker', 'soon' => true],
+    'consult-audit-worker' => ['title' => 'Leader, consultant, auditor and worker', 'soon' => true],
 ];
 
 /** Иерархия ролей из запроса: одна из ROLE_SCHEMES, пусто — solo. */

@@ -30,14 +30,14 @@ function batchDryRun(?bool $on = null): bool
  * @param array    $ops     список операций как прислан
  * @param callable $apply   fn(array $op, array $ctx): array — применяет одну операцию
  * @param array    $journal подпись журнала, когда правку делает не вызывающий (фоновое задание ИИ):
- *                          via, label, user_id; нет — из запроса и caller()
+ *                          via, label, user_id, op_scope, request_hash; нет — из запроса и caller()
  */
 function runBatch(array $project, array $ops, callable $apply, bool $respond = true, array $journal = []): ?array
 {
     $projectId = (int) $project['id'];
     $opId = trim((string) (input('opId') ?? ''));
-    $opScope = (string) (input('opScope') ?? '');
-    $hash = hash('sha256', json_encode($ops, JSON_UNESCAPED_UNICODE));
+    $opScope = (string) ($journal['op_scope'] ?? input('opScope') ?? '');
+    $hash = $journal['request_hash'] ?? hash('sha256', json_encode($ops, JSON_UNESCAPED_UNICODE));
     $ifRev = inputInt('ifRev');
     $ifFolder = input('ifFolderRev');
     $sign = [
@@ -54,6 +54,7 @@ function runBatch(array $project, array $ops, callable $apply, bool $respond = t
         // ревизии: одновременные повторы видят исход первой пачки, а не падают на её ключе.
         $repeat = journalFindRepeat($projectId, $opScope, $opId, $hash);
         if ($repeat) return $repeat + ['repeat' => true];
+        batchGuardClassicSchema($projectId, $ops);
         batchGuard($locked, $ifRev, $ifFolder);
 
         $rev = bumpRev($projectId);
@@ -107,6 +108,48 @@ function runBatch(array $project, array $ops, callable $apply, bool $respond = t
 
     if (!$respond) return $out;
     reply(['rev' => $out['rev'], 'results' => $out['results']] + (empty($out['repeat']) ? [] : ['repeat' => true]), $out['warnings']);
+}
+
+/** После перехода на граф правки старого редактора больше не попадают в схему. */
+function batchGuardClassicSchema(int $projectId, array $ops): void
+{
+    if (empty(config()['graph_editor'])) return;
+    foreach ($ops as $op) {
+        if (!is_array($op)) continue;
+        $legacy = match ($op['op'] ?? null) {
+            'folder.create', 'folder.delete', 'element.create', 'element.update', 'element.delete', 'element.restore',
+            'agent.detach' => true,
+            'folder.update' => (bool) array_intersect(array_keys($op),
+                ['name', 'parent', 'sort', 'style', 'workDir', 'workUrl', 'shareScheme', 'runEnv', 'roleScheme']),
+            'asset.link' => isset($op['element']) || isset($op['folder']),
+            'asset.create' => isset($op['link']['element']) || isset($op['link']['folder']),
+            'asset.unlink' => (!empty($op['asset']) && !empty($op['folder'])) || batchClassicAssetLink($projectId, $op),
+            'asset.role' => batchClassicAssetLink($projectId, $op),
+            default => false,
+        };
+        if (!$legacy) continue;
+        requireClassicSchemaWrite($projectId, (bool) array_intersect(array_column($ops, 'op'), GRAPH_WRITE_OPS));
+        return;
+    }
+}
+
+/** Вызывать под замком проекта, который держит и перенос в граф. */
+function requireClassicSchemaWrite(int $projectId, bool $openingGraph = false): void
+{
+    if (!empty(config()['graph_editor']) && dbValue("SELECT 1 FROM schema_migrations WHERE name = '035-graph.sql'")
+        && ($openingGraph || graphRootId($projectId) !== null)) {
+        throw new ApiError(t('server.batch.classic_schema_retired'), 'conflict', ['code2' => 'classic_schema_retired']);
+    }
+}
+
+function batchClassicAssetLink(int $projectId, array $op): bool
+{
+    $id = filter_var($op['id'] ?? null, FILTER_VALIDATE_INT);
+    return $id !== false && (bool) dbValue(
+        'SELECT 1 FROM asset_links WHERE project_id = ? AND id = ? AND made_by_run IS NULL
+          AND (element_id IS NOT NULL OR folder_id IS NOT NULL)',
+        [$projectId, $id]
+    );
 }
 
 /** Сторожа: ревизия проекта и ревизия содержимого папки. */

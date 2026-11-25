@@ -22,13 +22,13 @@ ALTER TABLE templates
   ADD KEY ix_templates_catalog (in_catalog, category, sort);
 
 INSERT IGNORE INTO template_categories (`key`, title, icon, about, sort) VALUES
-  ('sites',  'Сайты и лендинги',     'globe',    'Лендинги, страницы товара, многостраничные сайты и доработка готовых', 10),
-  ('photo',  'Фото',                 'image',    'Генерация, ретушь, вырезка фона, серии карточек товара',               20),
-  ('video',  'Видео',                'film',     'Ролики из картинок, нарезка, озвученные клипы, анимация',              30),
-  ('texts',  'Тексты и контент',     'text',     'Статьи, описания, переводы, редактура и контент-планы',                40),
-  ('social', 'Соцсети и маркетинг',  'megaphone','Посты с картинками, рекламные креативы, серии публикаций',             50),
-  ('docs',   'Документы и отчёты',   'file',     'Отчёты, КП, презентации и сводки из данных',                           60),
-  ('data',   'Данные и API',         'database', 'Запросы к сервисам, выгрузки, таблицы и сводки',                       70),
-  ('audio',  'Аудио и озвучка',      'music',    'Озвучка текста, подкасты, музыка и звуковые дорожки',                  80),
-  ('code',   'Код и автоматизация',  'code',     'Скрипты, мини-приложения, проверки и автоматизация рутины',            90),
-  ('basics', 'Основы Гоблина',       'book',     'Учебные схемы: цепочка, развилка, цикл, параллель, проверка',         100);
+  ('sites', 'Sites and landing pages', 'globe', 'Landing pages, product pages, multi-page sites and finishing existing ones', 10),
+  ('photo', 'Photo', 'image', 'Generation, retouching, background removal, series of product cards', 20),
+  ('video', 'Video', 'film', 'Videos from images, cutting, voiced clips, animation', 30),
+  ('texts', 'Texts and content', 'text', 'Articles, descriptions, translations, editing and content plans', 40),
+  ('social', 'Social media and marketing', 'megaphone', 'Posts with images, ad creatives, series of publications', 50),
+  ('docs', 'Documents and reports', 'file', 'Reports, proposals, presentations and summaries from data', 60),
+  ('data', 'Data and APIs', 'database', 'Requests to services, exports, tables and summaries', 70),
+  ('audio', 'Audio and voice-over', 'music', 'Voice-over of a text, podcasts, music and sound tracks', 80),
+  ('code', 'Code and automation', 'code', 'Scripts, mini apps, checks and routine automation', 90),
+  ('basics', 'Goblin basics', 'book', 'Learning schemes: a chain, a fork, a loop, parallel branches, a check', 100);

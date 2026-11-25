@@ -8,7 +8,10 @@
    что на компьютере, только в шторке. */
 
 /* Свои узлы мобильного скина на компьютере не видны. */
-.m-top,.m-drawer,.m-bar,.m-chip,.m-rail-foot,.m-panel-empty,.m-ai-close,.m-marquee{display:none}
+.m-top,.m-return,.m-drawer,.m-bar,.m-chip,.m-rail-foot,.m-panel-empty,.m-ai-close,.m-marquee{display:none}
+@media (max-width: 650px), (pointer: coarse) and (max-width: 900px){
+  body:not([data-look="mobile"]) .m-return{display:inline-flex;flex:none;white-space:nowrap}
+}
 
 /* Шторка шириной с ряд значков в шапке: 7 вкладок по 52 точки. */
 body[data-look="mobile"]{--topbar-h:56px;--m-tab-w:52px;--m-drawer-w:min(calc(var(--m-tab-w) * 7),100vw);
@@ -161,6 +164,7 @@ body[data-look="mobile"] .rail .menu-item{width:100%;flex-direction:column;justi
 body[data-look="mobile"] .rail .menu-item > span:first-child{flex:none}
 body[data-look="mobile"] .rail .menu-item > span:first-child svg{width:26px;height:26px}
 body[data-look="mobile"] .m-rail-foot{display:block;margin-top:14px}
+body[data-look="mobile"] .m-skin-pick{margin-bottom:var(--gap-sm)}
 body[data-look="mobile"] .m-rail-foot .btn{width:100%;height:auto;min-height:46px;padding:4px;justify-content:center;
   white-space:normal;text-align:center;font-size:12px;line-height:1.2}
 

@@ -6,7 +6,7 @@
 
    Зачем собирать, а не держать один MD: агент получает только свой сценарий —
    состав команды (solo или команда) и среду (субагенты, Орка, SendMessage).
-   Лишнее в инструкции агент пытается исполнить. Тексты — частями в instructions/<язык>/прогон.md
+   Лишнее в инструкции агент пытается исполнить. Тексты — частями в instructions/<язык>/run.md
    (язык проекта, langAgents); здесь только выбор частей. Прежние MD — instructions/old/simple/. */
 
 declare(strict_types=1);
@@ -88,7 +88,7 @@ function instrPart(string $name, array $vars = []): string
     static $files = [];
     $dir = config()['instructions_dir'];
     $mark = '<!-- part:' . $name . " -->\n";
-    foreach (array_unique([langFile($dir, 'прогон.md', langAgents()), $dir . '/ru/прогон.md']) as $file) {
+    foreach (array_unique([langFile($dir, 'run.md', langAgents())]) as $file) {
         $text = $files[$file] ??= (string) @file_get_contents($file);
         $start = strpos($text, $mark);
         if ($start === false) continue;
@@ -250,4 +250,14 @@ function instrWorkEnv(string $env): string
         'sendmessage' => instrPart('work_env_send'),
         default       => instrPart('work_env_sub'),
     };
+}
+
+function instrNativeLead(int $parent): array
+{
+    return explode("\n", trim(instrPart('native_lead', ['parent' => $parent])));
+}
+
+function instrNativeWorker(int $runId, ?int $stepId = null): string
+{
+    return trim(instrPart('native_worker', ['run' => $runId, 'step' => $stepId ? " and `step=$stepId`" : '']));
 }

@@ -332,6 +332,7 @@
  "agents.ai.too_many": "more than {max} elements — split the scheme into folders",
  "agents.ai.no_chat": "Chat not found",
  "agents.ai.empty_question": "Empty question",
+ "agents.ai.connection_missing": "AI connection is not set up. Check the address and API key.",
  "agents.ai.no_job": "Job not found",
  "agents.ai.job_done": "This job has already been applied or cancelled",
  "agents.ai.nothing_to_apply": "Nothing to apply",

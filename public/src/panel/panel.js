@@ -216,9 +216,9 @@ function render() {
      прокрутка никуда не уезжает. Показываем другое (выбрали иной блок, ушли
      в папку) — начинаем с чистого листа и сверху: держать чужие секции нельзя,
      их поля правят прежний элемент. */
-  const key = state.selection.size > 1 ? 'много'
-    : current() ? 'элемент' + current().id
-      : state.welcome ? 'привет' : state.pickedProject ? 'проект' : 'папка';
+  const key = state.selection.size > 1 ? 'multiple'
+    : current() ? 'element' + current().id
+      : state.welcome ? 'welcome' : state.pickedProject ? 'project' : 'folder';
   // Пустое тело — его очистила другая вкладка: помнить показанное нельзя.
   if (key !== shownKey || !body.childElementCount) { shown.clear(); body.textContent = ''; body.scrollTop = 0; }
   shownKey = key;
@@ -238,12 +238,12 @@ function render() {
   // Выделено несколько — показываем то, что делают с набором, а не свойства.
   if (state.selection.size > 1) {
     if (head) head.hidden = false;
-    showWhole('много', (into) => renderMany({ body: into, no, kindLabel }));
+    showWhole('multiple', (into) => renderMany({ body: into, no, kindLabel }));
     return;
   }
   if (!element && state.welcome) { renderWelcome(); return; }
   if (!element && state.pickedProject) { renderProject(); return; }
-  if (!element) { showWhole('папка', renderFolder); return; }
+  if (!element) { showWhole('folder', renderFolder); return; }
 
   if (head) head.hidden = false;
   no.textContent = element.no;

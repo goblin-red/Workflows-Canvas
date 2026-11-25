@@ -1,4 +1,5 @@
 <section class="screen" id="screen-ai" hidden>
+  <div id="ai-agent"></div>
   <div class="ai-log" id="ai-log"></div>
   <div class="ai-foot">
     <textarea id="ai-input" class="input" rows="2" placeholder="{{t:editor.ai.placeholder}}"></textarea>
@@ -61,8 +62,13 @@
 </dialog>
 
 <!-- Открыть и сохранить: список способов, у каждого своя строка. -->
-<dialog class="dialog" id="dialog-files">
+<dialog class="dialog" id="dialog-files" aria-labelledby="dialog-files-title">
   <h3 class="dialog-title" id="dialog-files-title">{{t:editor.dialog.files_title}}</h3>
+  <fieldset class="files-style" id="dialog-files-style" hidden>
+    <legend>{{t:editor.files.style_label}}</legend>
+    <label><input type="radio" name="files-style" value="flat" checked> {{t:editor.files.style_flat}}</label>
+    <label><input type="radio" name="files-style" value="color"> {{t:editor.files.style_color}}</label>
+  </fieldset>
   <div class="file-list" id="dialog-files-body"></div>
   <div class="dialog-foot"><button class="btn btn-quiet" data-close>{{t:common.close}}</button></div>
 </dialog>
@@ -129,6 +135,10 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
       <b>{{t:editor.welcome.catalog}}</b><small>{{t:editor.welcome.catalog_hint}}</small>
     </button>
+    <a class="welcome-choice" href="first-steps.php" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h7l2 3h7v10H4zM8 14h7m-2-2 2 2-2 2"/></svg>
+      <b>{{t:editor.settings.first_steps}}</b>
+    </a>
   </div>
 </dialog>
 <!-- «Начать прогон»: ссылки-задания агенту — прогон и рисование — с пояснением, куда их отдать (run/start.js). -->

@@ -83,22 +83,25 @@ function taskOneLine(string $text): string
 function stepPackage(array $step, int $projectId): array
 {
     $run = runRow((int) $step['run_id'], $projectId);
+    $native = !empty($step['block_id']);
+    $node = $native ? (runScene($run)['nodes'][(int) $step['block_id']] ?? null) : null;
     $element = $step['element_id'] ? elementRow((int) $step['element_id'], $projectId) : null;
     $folder = $element ? folderRow((int) $element['folder_id'], $projectId) : null;
-    $meaning = $element ? taskMeaning((int) $element['id']) : null;
+    $meaning = $node ? nativeTaskMeaning($node) : ($element ? taskMeaning((int) $element['id']) : null);
+    $props = runStepProps($run, $step);
 
     $package = [
         'step'    => stepShape($step),
         'address' => $step['element_no'] . '.' . $step['attempt'],
         'run'     => 'r' . $run['no'],
-        'element' => $element ? elementShape($element, VIEW_WORK) : null,
-        'spec'    => $element ? specText('element_id', (int) $element['id']) : null,
+        'element' => $element ? elementShape($element, VIEW_WORK) : ($node ? nativeTaskBlock($node) : null),
+        'spec'    => $element ? specText('element_id', (int) $element['id']) : ($node['spec'] ?? null),
         // Тот же смысл задания, что у простого пути и проверяющего (taskMeaning).
         'about'   => $meaning['about'] ?? '',
         'context' => $meaning['context'] ?? [],
         'task'    => $meaning ? taskMeaningText($meaning) : '',
-        'inputs'  => $element ? stepInputs((int) $element['id']) : [],
-        'earlier' => stepEarlier((int) $run['id']),
+        'inputs'  => $element ? stepInputs((int) $element['id']) : ($node ? nativeMaterialLinks($node, true) : []),
+        'earlier' => $native ? [] : stepEarlier((int) $run['id']),
         'workDir' => (string) $run['work_dir'],
         // Результаты прогона — его папка out/rN, как в задании простого пути.
         'outDir'  => runOutDir($run, false),
@@ -106,12 +109,12 @@ function stepPackage(array $step, int $projectId): array
         'serviceDir'  => runServiceDir((int) $run['id']),
         'packageFile' => runServiceDir((int) $run['id']) . '/steps/' . (int) $step['id']
             . '-' . $step['element_no'] . '.' . $step['attempt'] . '.md',
-        'limits'  => $element ? [
-            'timeout'    => runProp((int) $element['id'], 'timeout', null),
-            'paidCalls'  => (int) runProp((int) $element['id'], 'paid_calls', 1),
-            'outputs'    => runProp((int) $element['id'], 'outputs', []),
+        'limits'  => $element || $node ? [
+            'timeout'    => $props['timeout'] ?? null,
+            'paidCalls'  => (int) ($props['paid_calls'] ?? 1),
+            'outputs'    => $props['outputs'] ?? [],
             // Сколько выдач у блока всего: worker важно знать, что попытка последняя.
-            'maxAttempts' => runProp((int) $element['id'], 'max_attempts', null),
+            'maxAttempts' => $props['max_attempts'] ?? null,
             'attempt'     => (int) $step['attempt'],
         ] : [],
         'previous' => stepPrevious((int) $run['id'], (int) $step['element_no'], (int) $step['attempt']),
@@ -124,15 +127,20 @@ function stepPackage(array $step, int $projectId): array
         // worker должен знать правила до работы, а не узнавать их из возврата.
         'input'    => stepInputText($step),
         'vars'     => varsIn((int) $step['id'])['vars'],
-        'answer'   => $element ? (string) runProp((int) $element['id'], 'answer', '') : '',
-        'accept'   => $element ? packageLines(propsOf((int) $element['id'])['accept'] ?? []) : [],
-        'reject'   => $element ? packageLines(propsOf((int) $element['id'])['reject'] ?? []) : [],
+        'answer'   => (string) ($props['answer'] ?? ''),
+        'accept'   => packageLines($props['accept'] ?? []),
+        'reject'   => packageLines($props['reject'] ?? []),
         // Кем работать: чем, какой моделью и с каким усилием. Без этого worker
         // выбирал настройки на глазок, а в карточке агента они уже записаны.
         'agent'    => $step['agent_id'] ? agentShape(dbRow('SELECT * FROM agents WHERE id = ?', [(int) $step['agent_id']])) : null,
         'rules'    => 'docs.get?file=worker',
         'stop'     => $run['stop_at'] !== null,
     ];
+
+    if ($native) {
+        unset($package['serviceDir'], $package['packageFile'], $package['workDir']);
+        $package['outDir'] = $run['work_dir'] === '' ? '' : 'out/r' . (int) $run['no'] . '/';
+    }
 
     // Общая картина схемы — только если человек включил это в свойствах папки.
     if ($folder && (int) $folder['share_scheme'] === 1) {
@@ -148,12 +156,13 @@ function stepPackage(array $step, int $projectId): array
  */
 function judgePackage(array $run, array $step, array $graph): array
 {
-    $elementId = (int) $step['element_id'];
+    $elementId = (int) historyNode($step);
     $props = $graph['nodes'][$elementId]['props'] ?? [];
 
     return [
         // Та же задача, что получил worker: описание, контекст групп и областей, ТЗ.
-        'task'      => $elementId ? taskMeaningText(taskMeaning($elementId)) : '',
+        'task'      => $elementId ? taskMeaningText(!empty($graph['native'])
+            ? nativeTaskMeaning($graph['nodes'][$elementId]) : taskMeaning($elementId)) : '',
         'input'     => stepInputText($step),
         'vars'      => varsIn((int) $step['id'])['vars'],
         'work_file' => stepWorkFile($step),
@@ -290,8 +299,8 @@ function stepEarlier(int $runId): array
        незачем: его вход — результат предыдущей работы. */
     $rows = dbAll(
         "SELECT s.element_no, s.element_title, s.result FROM run_steps s
-           JOIN elements e ON e.id = s.element_id
-          WHERE s.run_id = ? AND s.state = 'accepted' AND e.type NOT IN ('decision','gateway')
+           LEFT JOIN elements e ON e.id = s.element_id
+          WHERE s.run_id = ? AND s.state = 'accepted' AND COALESCE(s.block_kind, e.type) NOT IN ('decision','gateway')
           ORDER BY s.id",
         [$runId]
     );

@@ -1,5 +1,9 @@
 {
  "editor.looks.work": "Working",
+ "editor.looks.graph": "Graph",
+ "editor.looks.graph_about": "spatial canvas with a project tree",
+ "editor.looks.legacy_only": "This scheme is waiting to be imported. Open it for editing.",
+ "editor.looks.saving_before_switch": "Wait for the scheme to save before changing the skin.",
  "editor.looks.work_about": "even cards: title, description, badges",
  "editor.looks.classic": "Classic",
  "editor.looks.classic_about": "like the old Goblin: a cover across the whole card, a large title, MD and number",

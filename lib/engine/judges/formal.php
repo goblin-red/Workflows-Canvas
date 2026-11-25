@@ -23,7 +23,7 @@ declare(strict_types=1);
  */
 function judgeFormal(array $project, array $run, array $step, array $graph): array
 {
-    $nodeId = (int) $step['element_id'];
+    $nodeId = (int) historyNode($step);
     $result = trim((string) ($step['result'] ?? ''));
     $checks = [];
     $detail = [];

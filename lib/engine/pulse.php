@@ -10,7 +10,7 @@
 
 declare(strict_types=1);
 
-/** Сколько секунд после последнего события считаем, что скрипт ещё работает. */
+/** Сколько elapsed_seconds после последнего события считаем, что скрипт ещё работает. */
 const PULSE_FRESH = 25;
 
 /** GET pulse — кто сейчас работает в этом проекте. */
@@ -67,7 +67,7 @@ function pulseWorkers(int $projectId): array
 {
     $rows = dbAll(
         "SELECT s.element_no, s.attempt, s.state, s.element_title, a.name AS agent,
-                TIMESTAMPDIFF(SECOND, s.opened_at, NOW()) AS секунд, r.`no` AS run_no
+                TIMESTAMPDIFF(SECOND, s.opened_at, NOW()) AS elapsed_seconds, r.`no` AS run_no
            FROM run_steps s
            JOIN runs r ON r.id = s.run_id
       LEFT JOIN agents a ON a.id = s.agent_id
@@ -84,7 +84,7 @@ function pulseWorkers(int $projectId): array
         'agent'   => (string) ($row['agent'] ?? t('agents.w.no_agent')),
         'state'   => (string) $row['state'],
         'run'     => 'r' . (int) $row['run_no'],
-        'seconds' => (int) $row['секунд'],
+        'seconds' => (int) $row['elapsed_seconds'],
     ], $rows);
 }
 
@@ -105,14 +105,14 @@ function pulseScript(int $projectId): array
 function pulseKinds(int $projectId, array $kinds): array
 {
     $row = dbRow(
-        'SELECT title, TIMESTAMPDIFF(SECOND, at, NOW()) AS секунд FROM run_events
+        'SELECT title, TIMESTAMPDIFF(SECOND, at, NOW()) AS elapsed_seconds FROM run_events
           WHERE project_id = ? AND kind IN (' . implode(',', array_fill(0, count($kinds), '?')) . ')
           ORDER BY id DESC LIMIT 1',
         array_merge([$projectId], $kinds)
     );
     if (!$row) return ['live' => false, 'seconds' => null, 'title' => ''];
 
-    $seconds = (int) $row['секунд'];
+    $seconds = (int) $row['elapsed_seconds'];
     return [
         'live'    => $seconds <= PULSE_FRESH,
         'seconds' => $seconds,
@@ -124,13 +124,13 @@ function pulseKinds(int $projectId, array $kinds): array
 function pulseAi(int $projectId): array
 {
     $row = dbRow(
-        "SELECT j.kind, TIMESTAMPDIFF(SECOND, j.created_at, NOW()) AS секунд
+        "SELECT j.kind, TIMESTAMPDIFF(SECOND, j.created_at, NOW()) AS elapsed_seconds
            FROM ai_jobs j JOIN ai_chats c ON c.id = j.chat_id
           WHERE c.project_id = ? AND j.state IN ('queued','running')
           ORDER BY j.id DESC LIMIT 1",
         [$projectId]
     );
     return $row
-        ? ['live' => true, 'seconds' => (int) $row['секунд'], 'title' => (string) $row['kind']]
+        ? ['live' => true, 'seconds' => (int) $row['elapsed_seconds'], 'title' => (string) $row['kind']]
         : ['live' => false, 'seconds' => null, 'title' => ''];
 }

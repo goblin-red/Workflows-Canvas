@@ -16,9 +16,10 @@ export async function render(root, route) {
     name: 'schemes',
     rows,
     sort: { key: 'updated', dir: 'desc' },
-    search: ['name', 'project', 'key'],
+    search: ['name', 'project', 'key', 'author'],
     columns: [
       { key: 'name', title: t('admin.w.scheme'), render: (s) => el('div', '', [el('div', '', s.name || t('admin.w.unnamed')), el('div', 'adm-faint', s.project || s.key)]) },
+      { key: 'author', title: t('admin.schemes.author'), render: (s) => s.author || t('admin.schemes.author_unknown') },
       { key: 'blocks', title: t('admin.w.blocks'), type: 'num' },
       { key: 'decisions', title: t('admin.w.decisions'), type: 'num' },
       { key: 'frames', title: t('admin.schemes.frames'), type: 'num' },
@@ -29,7 +30,7 @@ export async function render(root, route) {
       { key: 'runs', title: t('admin.w.runs_n'), type: 'num' },
       { key: 'lastRun', title: t('admin.schemes.last_run'), render: (s) => (s.lastRun ? badge(s.lastRun) : el('span', 'adm-faint', '—')) },
       { key: 'updated', title: t('admin.w.edited'), type: 'date', render: (s) => el('span', 'nowrap', fmt.ago(s.updated)) },
-      { key: 'open', title: '', sort: false, render: (s) => outLink('↗', editorUrl(s.key, s.id)) },
+      { key: 'open', title: '', sort: false, render: (s) => outLink('↗', s.editorUrl || editorUrl(s.key, s.id)) },
     ],
     filters: [
       { label: t('admin.w.all'), test: () => true },
@@ -39,7 +40,10 @@ export async function render(root, route) {
       { label: t('admin.schemes.f_never'), test: (s) => s.runs === 0 },
       { label: t('admin.w.empty_plural'), test: (s) => s.blocks + s.decisions === 0 },
     ],
-    onRow: (s) => openScheme(s.id, route),
+    onRow: (s) => {
+      if (s.type === 'native') window.location.assign(s.editorUrl);
+      else openScheme(s.id, route);
+    },
   }));
   if (route.id) openScheme(route.id, route);
 }
@@ -66,9 +70,10 @@ async function openScheme(id, route) {
   };
 
   const body = el('div', '', [
-    el('div', 'adm-drawer-actions', [outLink(t('admin.w.open_editor'), editorUrl(s.key, s.id)), rename, drop]),
+    el('div', 'adm-drawer-actions', [outLink(t('admin.w.open_editor'), s.editorUrl || editorUrl(s.key, s.id)), rename, drop]),
     kv({
       [t('admin.w.project')]: el('a', 'adm-link', s.project || s.key), [t('admin.schemes.work_folder')]: el('span', 'adm-mono', s.workDir || '—'),
+      [t('admin.schemes.author')]: s.author || t('admin.schemes.author_unknown'),
       [t('admin.w.blocks')]: fmt.num(s.blocks), [t('admin.w.decisions')]: fmt.num(s.decisions), [t('admin.schemes.gateways')]: fmt.num(s.gateways), [t('admin.schemes.arrows')]: fmt.num(s.arrows),
       [t('admin.schemes.frames')]: fmt.num(s.frames), [t('admin.schemes.links')]: fmt.num(s.links), [t('admin.w.starter')]: s.starter ? t('admin.w.has') : t('admin.w.none'),
       [t('admin.w.created_f')]: fmt.date(s.created), [t('admin.w.edited')]: fmt.date(s.updated),

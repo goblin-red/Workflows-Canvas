@@ -6,6 +6,6 @@
 declare(strict_types=1);
 
 header('Location: ../account.php?section=structure', true, 302);
-echo '<meta charset="utf-8"><p>Утилита переехала в кабинет: '
-   . '<a href="../account.php?section=structure">Структура</a> и '
-   . '<a href="../account.php?section=lists">Списки</a>.</p>';
+echo '<meta charset="utf-8"><p>The utility has moved to your account: '
+   . '<a href="../account.php?section=structure">Structure</a> and '
+   . '<a href="../account.php?section=lists">Lists</a>.</p>';

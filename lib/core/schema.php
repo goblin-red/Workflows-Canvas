@@ -18,11 +18,7 @@ function schemaInstall(): void
 {
     $file = SCHEMA_DIR . (dbDriver() === 'sqlite' ? '/schema.sqlite.sql' : '/schema.sql');
     $sql = (string) file_get_contents($file);
-    // MySQL (не MariaDB) не даёт полям TEXT значения по умолчанию — снимаем; пропущенное поле там — пустая строка (db()).
-    if (dbDriver() === 'mysql' && !str_contains((string) db()->getAttribute(PDO::ATTR_SERVER_VERSION), 'MariaDB')) {
-        $sql = (string) preg_replace("/(`\\w+` (?:tiny|medium|long)?text\\b[^,\\n]*?) DEFAULT '(?:[^'\\\\]|\\\\.)*'/i", '$1', $sql);
-    }
-    db()->exec($sql);
+    db()->exec(schemaSqlForDriver($sql));
     // Схема сама отмечает свои миграции; доотмечаем те, что новее её шапки.
     foreach (schemaMigrations()['waiting'] as $name) dbRun('INSERT INTO schema_migrations (name, took_ms) VALUES (?, 0)', [$name]);
 
@@ -63,11 +59,18 @@ function schemaMigrate(string $name): void
     $file = SCHEMA_DIR . '/migrations/' . basename($name);
     if (dbDriver() === 'sqlite') {
         $file = substr($file, 0, -4) . '.sqlite.sql';
-        if (!is_file($file)) throw new RuntimeException('SQLite: у миграции ' . $name . ' нет двойника ' . basename($file));
+        if (!is_file($file)) throw new RuntimeException('SQLite: migration ' . $name . ' has no SQLite variant ' . basename($file));
     }
     $started = microtime(true);
-    db()->exec((string) file_get_contents($file));
+    db()->exec(schemaSqlForDriver((string) file_get_contents($file)));
     dbRun('INSERT INTO schema_migrations (name, took_ms) VALUES (?,?)', [basename($name), (int) ((microtime(true) - $started) * 1000)]);
+}
+
+/** MySQL 5.7 does not support TEXT defaults; MariaDB and SQLite keep their declarations. */
+function schemaSqlForDriver(string $sql): string
+{
+    if (dbDriver() !== 'mysql' || str_contains((string) db()->getAttribute(PDO::ATTR_SERVER_VERSION), 'MariaDB')) return $sql;
+    return (string) preg_replace("/(`\\w+` (?:tiny|medium|long)?text\\b[^,\\n]*?) DEFAULT '(?:[^'\\\\]|\\\\.)*'/i", '$1', $sql);
 }
 
 /**
@@ -81,7 +84,7 @@ function schemaSqlite(string $mysql): string
 {
     $now = static fn(string $digits) => $digits !== '' && $digits !== '0'
         ? "(strftime('%Y-%m-%d %H:%M:%f','now','localtime'))" : "(strftime('%Y-%m-%d %H:%M:%S','now','localtime'))";
-    $out = ["-- Гоблин: схема SQLite. Собрана из sql/schema.sql командой `php bin/server.php schema-sqlite` — руками не править.", '',
+    $out = ["-- Goblin Canvas SQLite schema, generated from sql/schema.sql by `php bin/server.php schema-sqlite`.", '',
         'PRAGMA foreign_keys = OFF;', ''];
     $table = null;
     $lines = $indexes = $triggers = [];
@@ -126,7 +129,7 @@ function schemaSqlite(string $mysql): string
                 in_array($kind, ['bigint', 'int', 'tinyint', 'smallint', 'mediumint'], true) => 'INTEGER',
                 in_array($kind, ['varchar', 'char', 'text', 'mediumtext', 'longtext', 'datetime', 'date', 'enum'], true) => 'TEXT',
                 in_array($kind, ['decimal', 'double', 'float'], true) => 'REAL',
-                default => throw new RuntimeException("schema-sqlite: тип $kind у $table.$col"),
+                default => throw new RuntimeException("schema-sqlite: unsupported type $kind in $table.$col"),
             };
             if (str_contains($rest, 'AUTO_INCREMENT')) {
                 $lines[] = '"' . $col . '" INTEGER PRIMARY KEY AUTOINCREMENT';
@@ -154,7 +157,7 @@ function schemaSqlite(string $mysql): string
         } elseif (preg_match('/^CONSTRAINT `(\w+)` (FOREIGN KEY|CHECK) (.+)$/', $trim, $m)) {
             $lines[] = 'CONSTRAINT "' . $m[1] . '" ' . $m[2] . ' ' . $name($m[3]);
         } else {
-            throw new RuntimeException("schema-sqlite: не понял строку в $table: $trim");
+            throw new RuntimeException("schema-sqlite: unrecognized syntax in $table: $trim");
         }
     }
     $out[] = 'PRAGMA foreign_keys = ON;';

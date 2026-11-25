@@ -35,6 +35,21 @@ function aiAccessUse(?int $userId): void
     $GLOBALS['goblin_access_user'] = $userId;
 }
 
+/** Терминал выбирает вошедший в аккаунт человек из своей браузерной сессии. */
+function aiSessionAgentUser(): ?int
+{
+    $who = caller();
+    if (($who['scope'] ?? '') !== 'session' || empty($who['user_id'])) return null;
+    $user = (int) $who['user_id'];
+    return aiAgentEnabled($user) ? $user : null;
+}
+
+function aiSelectedAgentUser(): ?int
+{
+    if (array_key_exists('goblin_terminal_agent_user', $GLOBALS)) return $GLOBALS['goblin_terminal_agent_user'];
+    return aiSessionAgentUser();
+}
+
 /** Действующий доступ: личные поля поверх общих. */
 function aiAccess(): array
 {

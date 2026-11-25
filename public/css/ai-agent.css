@@ -1,0 +1,16 @@
+.ai-agent-control { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-xs) var(--gap-sm); }
+.ai-agent-badge { font-size: var(--f-sm); }
+.ai-agent-badge:empty { display: none; }
+#screen-ai .ai-agent-control { padding: var(--gap-sm) var(--gap-md) 0; }
+.ai-agent-dialog { width: min(500px, 94vw); max-height: 90dvh; overflow: auto; }
+.ai-agent-dialog p { margin: 0 0 var(--gap-sm); }
+.ai-agent-dialog .btn { white-space: normal; height: auto; min-height: 32px; }
+.ai-agent-status, .ai-agent-error { overflow-wrap: anywhere; }
+.ai-agent-error { color: var(--bad); }
+.ai-agent-invite { display: grid; gap: var(--gap-sm); margin: var(--gap-sm) 0; }
+.ai-agent-instruction { width: 100%; font-family: var(--mono); }
+.ai-agent-rename { margin: var(--gap-sm) 0; }
+.ai-agent-dialog > .btn { margin-inline-end: var(--gap-sm); margin-block-end: var(--gap-xs); }
+@media (max-width: 650px) {
+  .ai-agent-dialog .btn { min-height: 40px; }
+}

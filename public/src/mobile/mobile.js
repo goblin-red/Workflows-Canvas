@@ -18,6 +18,7 @@ import { initTouch } from 'goblin/mobile/touch.js';
 import { initBar } from 'goblin/mobile/bar.js';
 import { initFolds } from 'goblin/mobile/folds.js';
 import { initMobileCamera, savedCamera, readableFit } from 'goblin/mobile/camera.js';
+import { setLook } from 'goblin/canvas/looks.js';
 import { toggleAi } from 'goblin/panel/ai.js';
 import { t } from 'goblin/core/i18n.js';
 
@@ -59,11 +60,16 @@ function keepCanvas() {
 
 /* Вкладки меню встают в шапку сами (mobile/drawer.js) — перед .m-gap. */
 function buildTop() {
+  const mobile = document.createElement('button');
+  mobile.type = 'button';
+  mobile.className = 'btn m-return';
+  mobile.textContent = t('editor.looks.mobile');
+  mobile.onclick = () => setLook('mobile');
   const top = document.createElement('div');
   top.className = 'm-top';
   top.innerHTML = `<span class="m-gap"></span><button class="m-folder"></button>`;
   top.querySelector('.m-folder').onclick = () => toggleDrawer('folders');
-  document.querySelector('.topbar')?.prepend(top);
+  document.querySelector('.topbar')?.prepend(mobile, top);
   showFolder();
 }
 

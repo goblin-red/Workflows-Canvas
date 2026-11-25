@@ -16,16 +16,11 @@
 
 declare(strict_types=1);
 
-const LANGS = ['ru', 'en'];
+const LANGS = ['en'];
 
-/** Язык человека: cookie, иначе язык установки (lang_default). Ответ агенту — язык проекта (langForAgent). */
 function lang(): string
 {
-    if (langForAgent()) return langAgents();
-    $asked = (string) ($_COOKIE['goblin_lang'] ?? '');
-    if (in_array($asked, LANGS, true)) return $asked;
-    $default = (string) (config()['lang_default'] ?? 'ru');
-    return in_array($default, LANGS, true) ? $default : 'ru';
+    return 'en';
 }
 
 /** Адресат ответа — агент? С аргументом — отметить (dispatch() в lib/api/router.php). */
@@ -36,12 +31,9 @@ function langForAgent(?bool $set = null): bool
     return $agent;
 }
 
-/** Язык агентов проекта; с аргументом — поставить. */
 function langAgents(?string $set = null): string
 {
-    static $lang = 'ru';
-    if ($set !== null) $lang = in_array($set, LANGS, true) ? $set : 'ru';
-    return $lang;
+    return 'en';
 }
 
 /** Текст для агентов — на языке проекта. */
@@ -65,22 +57,16 @@ function langFill(string $text, array $vars): string
     return $text;
 }
 
-/** Файл на языке: <папка>/<язык>/<имя>, нет перевода — русский. Так лежат md-инструкции (instructions/ru|en). */
+/** Path to an English instruction. */
 function langFile(string $dir, string $name, ?string $lang = null): string
 {
-    $path = $dir . '/' . ($lang ?? lang()) . '/' . $name;
-    return is_file($path) ? $path : $dir . '/ru/' . $name;
+    return $dir . '/en/' . $name;
 }
 
-/** Словарь языка поверх русского. */
 function langDict(?string $lang = null): array
 {
-    static $cache = [];
-    $lang ??= lang();
-    if (!isset($cache[$lang])) {
-        $cache[$lang] = $lang === 'ru' ? langFiles('ru') : array_merge(langFiles('ru'), langFiles($lang));
-    }
-    return $cache[$lang];
+    static $dict = null;
+    return $dict ??= langFiles('en');
 }
 
 function langFiles(string $lang): array
@@ -106,15 +92,9 @@ function tn(string $key, int $n, array $vars = []): string
     return langFill($dict["$key.$form"] ?? $dict["$key.other"] ?? $dict["$key.many"] ?? $key, ['n' => $n] + $vars);
 }
 
-/** Форма числа — как Intl.PluralRules в браузере. */
 function langPlural(string $lang, int $n): string
 {
-    if ($lang !== 'ru') return $n === 1 ? 'one' : 'other';
-    $last = $n % 10;
-    $tens = $n % 100;
-    if ($last === 1 && $tens !== 11) return 'one';
-    if ($last >= 2 && $last <= 4 && ($tens < 12 || $tens > 14)) return 'few';
-    return 'many';
+    return $n === 1 ? 'one' : 'other';
 }
 
 /** Словарь для браузера — только нужные части (editor, common, …), встраивается в страницу. */

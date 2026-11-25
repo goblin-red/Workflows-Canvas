@@ -49,7 +49,7 @@ function projectShape(array $row): array
         'id'           => (int) $row['id'],
         'key'          => (string) $row['url_key'],
         'title'        => (string) $row['title'],
-        'lang'         => (string) ($row['lang'] ?? 'ru'),
+        'lang'         => (string) ($row['lang'] ?? 'en'),
         'filesServer'  => (int) ($row['files_server'] ?? 0) === 1,
         'rev'          => (int) $row['rev'],
         'owner'        => $row['owner_id'] ? (int) $row['owner_id'] : null,

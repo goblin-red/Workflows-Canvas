@@ -20,6 +20,30 @@ const OPS = [
     'token.create'   => ['POST', 'tokenCreateOp', ['human'],               'single'],
     'token.revoke'   => ['POST', 'tokenRevokeOp', ['human'],               'single'],
 
+    // ── Граф ────────────────────────────────────────────────
+    'graph.projects'  => ['GET',  'graphProjects',   ['human', 'lead', 'ai'], 'read'],
+    'graph.get'       => ['GET',  'graphGet',        ['human', 'lead', 'ai'], 'read'],
+    'graph.scene'     => ['GET',  'graphSceneGet',   ['human', 'lead', 'ai'], 'read'],
+    'graph.importLegacy' => ['POST', 'graphImportLegacy', ['human'], 'single'],
+    'graph.rev'       => ['GET',  'graphRev',        ['human', 'lead', 'ai'], 'read'],
+    'graph.neighbors' => ['GET',  'graphNeighbors',  ['human', 'lead', 'ai'], 'read'],
+    'block.get'       => ['GET',  'graphBlockGet',   ['human', 'lead', 'ai'], 'read'],
+    'block.create'    => ['POST', 'graphBlockWrite', ['human', 'lead', 'ai'], 'batch'],
+    'block.update'    => ['POST', 'graphBlockWrite', ['human', 'lead', 'ai'], 'batch'],
+    'block.content'   => ['POST', 'graphBlockContent', ['human', 'lead', 'ai'], 'batch'],
+    'block.delete'    => ['POST', 'graphBlockWrite', ['human', 'lead', 'ai'], 'batch'],
+    'arrow.create'    => ['POST', 'graphArrowWrite', ['human', 'lead', 'ai'], 'batch'],
+    'arrow.update'    => ['POST', 'graphArrowWrite', ['human', 'lead', 'ai'], 'batch'],
+    'arrow.delete'    => ['POST', 'graphArrowWrite', ['human', 'lead', 'ai'], 'batch'],
+    'placement.create' => ['POST', 'graphPlacementWrite', ['human', 'lead', 'ai'], 'batch'],
+    'placement.update' => ['POST', 'graphPlacementWrite', ['human', 'lead', 'ai'], 'batch'],
+    'placement.delete' => ['POST', 'graphPlacementWrite', ['human', 'lead', 'ai'], 'batch'],
+    'graph.asset.list'   => ['GET', 'graphAssetList',    ['human', 'lead', 'ai'], 'read'],
+    'graph.asset.file'   => ['GET', 'graphAssetFile',    ['human', 'lead'],       'read'],
+    'graph.asset.add'    => ['POST', 'graphAssetAdd',    ['human', 'lead', 'ai'], 'batch'],
+    'graph.asset.upload' => ['POST', 'graphAssetUpload', ['human', 'lead'],       'single'],
+    'graph.template.apply' => ['POST', 'graphTemplateApply', ['human', 'lead'], 'batch'],
+
     // ── Папки ────────────────────────────────────────────────
     'folder.embed' => ['GET', 'folderEmbed', ['human', 'lead', 'ai'], 'read'],
     'folder.get'    => ['GET',  'folderGet',    ['human', 'lead', 'worker', 'ai'], 'read'],
@@ -135,10 +159,24 @@ const OPS = [
     'ai.chat.apply'  => ['POST', 'aiChatApply',  ['human'], 'single'],
     'ai.chat.cancel' => ['POST', 'aiChatCancel', ['human'], 'single'],
     'ai.chat.delete' => ['POST', 'aiChatDelete', ['human'], 'single'],
+    'ai.graph.propose' => ['POST', 'aiGraphPropose', ['human'], 'single'],
+    'ai.graph.apply'   => ['POST', 'aiGraphApply',   ['human'], 'single'],
     'ai.build.get'    => ['GET',  'aiBuildGet',    ['human'], 'read'],
     'ai.build.start'  => ['POST', 'aiBuildStart',  ['human'], 'single'],
     'ai.build.answer' => ['POST', 'aiBuildAnswer', ['human'], 'single'],
     'ai.build.create' => ['POST', 'aiBuildCreate', ['human'], 'single'],
+    'ai.agent.status'     => ['GET',  'aiAgentStatus',     ['human'], 'agent-account'],
+    'ai.agent.targets'    => ['GET',  'aiAgentTargets',    ['human'], 'agent-account'],
+    'ai.agent.invite'     => ['POST', 'aiAgentInvite',     ['human'], 'agent-account'],
+    'ai.agent.select'     => ['POST', 'aiAgentSelect',     ['human'], 'agent-account'],
+    'ai.agent.rename'     => ['POST', 'aiAgentRename',     ['human'], 'agent-account'],
+    'ai.agent.disconnect' => ['POST', 'aiAgentDisconnect', ['human'], 'agent-account'],
+    'ai.agent.connect'    => ['POST', 'aiAgentConnect', ['terminal-agent'], 'agent-terminal'],
+    'ai.agent.take'       => ['POST', 'aiAgentTake',    ['terminal-agent'], 'agent-terminal'],
+    'ai.agent.finish'     => ['POST', 'aiAgentFinish',  ['terminal-agent'], 'agent-terminal'],
+    'ai.agent.projects'   => ['GET',  'aiAgentEditorProjects', ['terminal-agent'], 'agent-terminal'],
+    'ai.agent.scene'      => ['GET',  'aiAgentEditorScene', ['terminal-agent'], 'agent-terminal'],
+    'ai.agent.edit'       => ['POST', 'aiAgentEditorEdit', ['terminal-agent'], 'agent-terminal'],
     // Голос: пропуск на живое распознавание и озвучка ответа — в журнал не пишутся (lib/ai/voice.php).
     'voice.session'   => ['POST', 'voiceSession',  ['human'], 'read'],
     'voice.speak'     => ['POST', 'voiceSpeak',    ['human'], 'read'],
@@ -172,6 +210,21 @@ function dispatch(): void
     requireSameOrigin();   // запись — только со своих страниц (lib/api/http.php)
     $req = request();
     if ($req['method'] === 'OPTIONS') reply();
+    // У помощника отдельный пропуск. Операции связи не пишутся в журнал проекта.
+    $agentHeader = (string) ($_SERVER['HTTP_X_GOBLIN_AI_AGENT'] ?? '');
+    $agentRule = OPS[$req['op']] ?? null;
+    $agentMode = $agentRule[3] ?? '';
+    if (in_array($agentMode, ['agent-account', 'agent-terminal'], true)) {
+        if ($req['method'] !== $agentRule[0]) {
+            throw new ApiError(t('server.api.op_method', ['name' => $req['op'], 'method' => $agentRule[0]]));
+        }
+        if ($req['token'] !== '' || ($agentMode === 'agent-account' && $agentHeader !== '')) {
+            throw new ApiError(t('server.token.wrong_op', ['op' => $req['op']]), 'scope');
+        }
+        $agentRule[1]();
+        return;
+    }
+    if ($agentHeader !== '') throw new ApiError(t('server.token.wrong_op', ['op' => $req['op']]), 'scope');
     // Отвечаем агенту — и ошибки сервера на языке проекта, как весь прогон (lib/core/i18n.php).
     if (simpleOp() || docsForAgent($req['op']) || in_array(callerRole(), ['lead', 'worker'], true)) langForAgent(true);
 
@@ -184,6 +237,11 @@ function dispatch(): void
             $rule = opRule($name);
             if ($rule[3] !== 'batch') throw new ApiError(t('server.api.op_single', ['name' => $name]));
             requireRole($rule[2], $name);
+        }
+        if (array_intersect(array_column($ops, 'op'), GRAPH_WRITE_OPS)) {
+            if ($req['method'] !== 'POST') throw new ApiError(t('server.api.op_method', ['name' => 'ops', 'method' => 'POST']));
+            graphRunBatch($ops);
+            return;
         }
         $project = requireProject(true);
         if (array_intersect(array_column($ops, 'op'), OWNER_OPS)) requireOwner($project);
@@ -219,6 +277,12 @@ function dispatch(): void
     }
 
     // Одиночная правка: та же пачка, только из одной операции.
+    if (in_array($name, GRAPH_WRITE_OPS, true)) {
+        $body = $req['body'];
+        $body['op'] = $name;
+        graphRunBatch([$body]);
+        return;
+    }
     $project = requireProject(true);
     if (in_array($name, OWNER_OPS, true)) requireOwner($project);
     $body = $req['body'];

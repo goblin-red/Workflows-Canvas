@@ -29,7 +29,7 @@ const ACTIONS = {
   },
   'cl-settings': openSettings,
   'cl-help': openHelp,
-  'cl-documentation': () => { window.open('documentation.php', '_blank', 'noopener'); },
+  'cl-documentation': () => { window.open('documentation.php?page=introduction', '_blank', 'noopener'); },
 };
 
 export function initSettings(holder) {

@@ -39,7 +39,7 @@ const CODE_WORDS = {
 const codeWord = () => CODE_WORDS[document.documentElement.lang] || CODE_WORDS.en;
 
 /** Язык речи для браузера: ru → ru-RU, en → en-US. */
-const speechLang = (lang) => ({ ru: 'ru-RU', en: 'en-US' })[lang] || navigator.language || 'ru-RU';
+const speechLang = (lang) => ({ ru: 'ru-RU', en: 'en-US' })[lang] || navigator.language || 'en-US';
 
 export const isDictating = () => !!live;
 /** Микрофон подключается: говорить ещё нельзя, но отправка вопроса должна оборвать и это. */
@@ -253,7 +253,7 @@ async function connect(field, mine, onWord) {
   };
   events.onmessage = (event) => {
     const message = JSON.parse(event.data);
-    if (globalThis.GOBLIN_VOICE_DEBUG) console.log('[голос]', message.type, JSON.stringify(message).slice(0, 300));
+    if (globalThis.GOBLIN_VOICE_DEBUG) console.log('[voice]', message.type, JSON.stringify(message).slice(0, 300));
     if (message.type === 'conversation.item.input_audio_transcription.delta') {
       writer.add(message.item_id, message.delta);
       watchWord();
@@ -261,7 +261,7 @@ async function connect(field, mine, onWord) {
       writer.done(message.item_id, message.transcript || '');
       settled?.();
     } else if (message.type === 'error') {
-      console.warn('[голос]', message.error?.message || message);
+      console.warn('[voice]', message.error?.message || message);
     }
   };
 

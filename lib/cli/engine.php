@@ -6,10 +6,10 @@
            workTake(), runState(), runPhase(), reviewOf(), didLine(), serverHas().
    Не делает: не знает правил прогона — ни условий ромба, ни приёмки, ни жетонов.
               Ход делает сервер (run.advance); утилита печатает, что он сделал,
-              и замечает, когда нужен человек или worker молчит.
+              и замечает, когда A person needs to act. или No response from the worker..
 
    Коды выхода (md_backend/ru/progon.md): 0 пройден или ход сделан · 2 сервер недоступен
-     3 нужен человек · 4 worker молчит · 5 остановлен, провален или на паузе · 6 тупик.
+     3 A person needs to act. · 4 No response from the worker. · 5 остановлен, провален или на паузе · 6 тупик.
 
    drive и work — основные команды: cmdDriveRoute() и cmdWorkRoute() выбирают путь по engine
    прогона. drive2 и work2 — имена-синонимы нового пути, drive1 и work1 — старый ход (engine = 1).
@@ -17,16 +17,16 @@
 
 declare(strict_types=1);
 
-const RUN_WORDS    = ['running' => 'идёт', 'paused' => 'на паузе', 'stopped' => 'остановлен',
-                      'done' => 'пройден', 'failed' => 'сорвался'];
-const DRIVER_WORDS = ['manual' => 'ведёт человек', 'utility' => 'ведёт утилита'];
-const JUDGE_WORDS  = ['human' => 'принимает человек', 'formal' => 'принимают формальные проверки'];
-const JEV_WORDS    = ['off' => 'Jev выключен', 'advisor' => 'Jev советует', 'judge' => 'Jev принимает'];
-const STEP_WORDS   = ['issued' => 'выдан', 'running' => 'в работе', 'submitted' => 'сдан',
-                      'accepted' => 'принят', 'returned' => 'возвращён', 'failed' => 'упал',
-                      'cancelled' => 'отменён'];
-const BY_WORDS     = ['formal' => 'формально', 'human' => 'человек', 'jev' => 'Jev',
-                      'lead' => 'leader', 'worker' => 'worker', 'script' => 'утилита'];
+const RUN_WORDS    = ['running' => 'running', 'paused' => 'paused', 'stopped' => 'stopped',
+                      'done' => 'completed', 'failed' => 'failed'];
+const DRIVER_WORDS = ['manual' => 'human-led', 'utility' => 'CLI-led'];
+const JUDGE_WORDS  = ['human' => 'human review', 'formal' => 'automated checks'];
+const JEV_WORDS    = ['off' => 'Jev off', 'advisor' => 'Jev advises', 'judge' => 'Jev reviews'];
+const STEP_WORDS   = ['issued' => 'issued', 'running' => 'in progress', 'submitted' => 'submitted',
+                      'accepted' => 'accepted', 'returned' => 'returned', 'failed' => 'failed',
+                      'cancelled' => 'cancelled'];
+const BY_WORDS     = ['formal' => 'formal checks', 'human' => 'human', 'jev' => 'Jev',
+                      'lead' => 'leader', 'worker' => 'worker', 'script' => 'CLI'];
 
 
 // ── Сервер ─────────────────────────────────────────────────────
@@ -46,10 +46,10 @@ function serverHas(string $op): bool
         if ($answer === null) {
             if ($why === 'network') die_(lastFail()->getMessage(), 'network', 2);
             if (in_array($why, ['unauthorized', 'scope'], true)) {
-                die_('пропуск не действует: прогон закрыт или пропуск отозван — '
-                    . 'возьмите новый (goblin attach rN)', $why, 2);
+                die_('Pass unavailable. The run may be closed or the pass revoked — '
+                    . 'Get a new pass with goblin attach rN.', $why, 2);
             }
-            die_('сервер не отдал список операций: ' . lastFail()->getMessage(), $why ?: 'server', 2);
+            die_('The server did not return its operation list: ' . lastFail()->getMessage(), $why ?: 'server', 2);
         }
         $ops = array_column($answer['ops'] ?? [], 'op');
     }
@@ -59,7 +59,7 @@ function serverHas(string $op): bool
 /** Новой операции ещё нет на сервере — сказать прямо, а не «неизвестная операция». */
 function needServer(string $op): void
 {
-    if (!serverHas($op)) die_("сервер ещё не умеет $op — это серверная часть этапа Э3", 'not_ready');
+    if (!serverHas($op)) die_("The server does not support $op. Update the server to use this operation.", 'not_ready');
 }
 
 /**
@@ -112,11 +112,11 @@ function runAdvanceDrain(array $f, int $since, int $sinceEvent, int $wait = 25):
         $before = $cursor;
         $answer = runAdvance($f, $since, $cursor, $page === 0 ? $wait : 0);
         if (!array_key_exists('lastEvent', $answer) || !array_key_exists('hasMoreEvents', $answer)) {
-            die_('run.advance не вернул lastEvent/hasMoreEvents', 'bad_contract');
+            die_('run.advance did not return lastEvent/hasMoreEvents', 'bad_contract');
         }
         foreach ($answer['did'] ?? [] as $one) {
             $event = (int) ($one['event'] ?? 0);
-            if ($event <= 0) die_('событие did без числового event id', 'bad_contract');
+            if ($event <= 0) die_('An action event is missing its numeric ID.', 'bad_contract');
             if ($event <= $sinceEvent || isset($seen[$event])) continue;
             $seen[$event] = true;
             $did[] = $one;
@@ -128,17 +128,17 @@ function runAdvanceDrain(array $f, int $since, int $sinceEvent, int $wait = 25):
             $answer['lastEvent'] = $cursor;
             return [$answer, $cursor];
         }
-        if ($cursor <= $before) die_('сервер не двигает lastEvent при hasMoreEvents', 'bad_contract');
+        if ($cursor <= $before) die_('The server did not advance lastEvent while reporting more events.', 'bad_contract');
         $since = (int) ($answer['run']['version'] ?? $since);
     }
-    die_('слишком много страниц did — lastEvent не исчерпан', 'bad_contract');
+    die_('More action pages remain after the allowed number of requests.', 'bad_contract');
 }
 
 /**
  * Ход круга. Отдаёт [ответ, курсор событий]; прогон закрылся — [null, курсор],
  * а в `$end` лежит код выхода.
  *
- * Сервер гасит пропуск leader, как только прогон пройден или остановлен, поэтому
+ * Сервер гасит пропуск leader, как только Run completed. или остановлен, поэтому
  * последний запрос круга приходит отказом. Это конец работы, а не сбой: перечитываем
  * состояние ключом проекта и отвечаем как положено.
  */
@@ -157,7 +157,7 @@ function advanceOrEnd(array $f, int $since, int $sinceEvent, ?int &$end, int $wa
         $state = quiet(static fn() => call('GET', 'run.state', ['run' => $label], ['anon' => true], 20));
         $where = (string) ($state['run']['state'] ?? '');
         if ($where === 'done') {
-            say('✓ ' . runLabel($state) . ' пройден');
+            say('✓ ' . runLabel($state) . ' completed');
             $end = 0;
             return [null, $sinceEvent];
         }
@@ -170,8 +170,8 @@ function advanceOrEnd(array $f, int $since, int $sinceEvent, ?int &$end, int $wa
     // Живой прогон и отказ по пропуску: чаще всего в окружении лежат сразу
     // пропуск leader и пропуск агента, а утилита берёт агентский раньше.
     if (in_array($why, ['unauthorized', 'scope'], true) && cfg('agent') !== '' && cfg('run') !== '') {
-        $sorry .= '; в окружении сразу GOBLIN_AGENT и GOBLIN_RUN — leader и worker'
-            . ' работают в разных окружениях, для drive оставь только GOBLIN_RUN';
+        $sorry .= '. GOBLIN_AGENT and GOBLIN_RUN are both set. The leader and worker'
+            . ' use separate environments. Keep only GOBLIN_RUN for drive.';
     }
     die_($sorry, $why ?: 'server', 2);
 }
@@ -207,7 +207,7 @@ function runNeedsAdvance(array $a, array &$seen): bool
     if (empty($a['needsAdvance'])) return false;
     $version = (int) ($a['run']['version'] ?? -1);
     if (isset($seen[$version])) {
-        die_('сервер повторил needsAdvance без смены version — автоматический ход остановлен',
+        die_('The server repeated needsAdvance without changing version. Automatic advancement stopped.',
             'bad_contract', 3);
     }
     $seen[$version] = true;
@@ -239,15 +239,15 @@ function didLine(array $d): string
     };
 
     return match ((string) ($d['kind'] ?? '')) {
-        'accept' => "✓ принят $step$by" . $tail("принят $step"),
-        'return' => "↩ возвращён $step$by" . $tail("возвращён $step"),
-        'decide' => "◆ ромб $step → " . (($d['branch'] ?? '') === 'yes' ? 'да' : 'нет') . ($why !== '' ? " ($why)" : ''),
-        'open'   => "→ выдан $step" . (!empty($d['agent']) ? " · {$d['agent']}" : ''),
-        'message' => '✉ ' . ($why !== '' ? $why : 'сообщение') . ($step !== null ? " · шаг $step" : ''),
+        'accept' => "✓ accepted $step$by" . $tail("accepted $step"),
+        'return' => "↩ returned $step$by" . $tail("returned $step"),
+        'decide' => "◆ decision $step → " . (($d['branch'] ?? '') === 'yes' ? 'yes' : 'no') . ($why !== '' ? " ($why)" : ''),
+        'open'   => "→ issued $step" . (!empty($d['agent']) ? " · {$d['agent']}" : ''),
+        'message' => '✉ ' . ($why !== '' ? $why : 'message') . ($step !== null ? " · step $step" : ''),
         // Заголовок события сам может начинаться словами «прогон закрыт»:
         // срезаем повтор, иначе выходило «прогон закрыт: прогон закрыт: …».
-        'finish' => '■ прогон закрыт' . ($why !== ''
-            ? ': ' . preg_replace('/^прогон закрыт:\s*/u', '', $why)
+        'finish' => '■ run closed' . ($why !== ''
+            ? ': ' . preg_replace('/^(?:run closed|прогон закрыт):\s*/iu', '', $why)
             : ''),
         default  => '· ' . trim(($d['kind'] ?? '') . " $step") . ($why !== '' ? ": $why" : ''),
     };
@@ -257,38 +257,38 @@ function didLine(array $d): string
 function sayState(array $a): void
 {
     $run = $a['run'];
-    say(sprintf('прогон %s · %s · %s · %s · %s · пауза показа %s с · версия %d',
+    say(sprintf('run %s · %s · %s · %s · %s · display pause %s s · version %d',
         $run['label'] ?? '?',
         RUN_WORDS[$run['state'] ?? ''] ?? ($run['state'] ?? '?'),
-        DRIVER_WORDS[$run['driver'] ?? ''] ?? 'ведёт ?',
-        JUDGE_WORDS[$run['judge'] ?? ''] ?? 'принимает ?',
+        DRIVER_WORDS[$run['driver'] ?? ''] ?? 'unknown driver',
+        JUDGE_WORDS[$run['judge'] ?? ''] ?? 'unknown reviewer',
         JEV_WORDS[$run['jev'] ?? ''] ?? 'Jev ?',
         secs($run['showPause'] ?? 0),
         (int) ($run['version'] ?? 0)));
 
-    if (trim((string) ($run['waitFor'] ?? '')) !== '') say('чего ждёт: ' . $run['waitFor']);
+    if (trim((string) ($run['waitFor'] ?? '')) !== '') say('Waiting for: ' . $run['waitFor']);
 
     /* Сданный ответ показываем прямо здесь. Без него leader, у которого нет
        под рукой вывода drive, решал вслепую: строка «ждёт вашей приёмки»
        называла шаг, но не то, что в нём сдано. */
     foreach ($a['open'] ?? [] as $one) {
         $said = trim((string) ($one['result'] ?? ''));
-        say("  открыт {$one['no']}.{$one['attempt']} — " . (STEP_WORDS[$one['state']] ?? $one['state'])
+        say("  Open {$one['no']}.{$one['attempt']} — " . (STEP_WORDS[$one['state']] ?? $one['state'])
             . ($said !== '' ? ': ' . mb_substr($said, 0, 120) : ''));
 
         if (($one['state'] ?? '') === 'submitted') {
-            say("     принять: goblin go {$one['no']}   ·   вернуть: goblin go {$one['no']} --return «что не так»");
+            say("     Accept: goblin go {$one['no']}   ·   return: goblin go {$one['no']} --return REASON");
         }
     }
     // У закрытого прогона «готово к выдаче» — не подсказка, а обман:
     // выдавать уже нечего и некому.
     $alive = in_array((string) ($run['state'] ?? ''), ['running', 'paused'], true);
     if ($alive && !empty($a['ready'])) {
-        say('готово, но движок сам не делает: ' . implode(', ', array_map(
+        say('Ready for a manual action: ' . implode(', ', array_map(
             static fn($r) => (string) ($r['no'] ?? '?') . (!empty($r['title']) ? " «{$r['title']}»" : ''),
             $a['ready'])));
     }
-    if (($a['wakeIn'] ?? null) !== null) say('следующий ход через ' . secs($a['wakeIn']) . ' с — пауза показа');
+    if (($a['wakeIn'] ?? null) !== null) say('next action in ' . secs($a['wakeIn']) . ' s (display pause)');
 }
 
 /** Шаги строками: значок, адрес, результат. */
@@ -330,8 +330,8 @@ function cmdHistory(array $f): int
     $rows = array_values(array_filter($a['steps'] ?? [], static fn($one) =>
         ($all || $one['state'] === 'accepted') && (!$no || (int) $one['no'] === $no)));
 
-    say('прогон ' . runLabel($a) . ' · ' . ($all ? 'все попытки' : 'принятое')
-        . ($no ? " · блок $no" : '') . ' · ' . count($rows));
+    say('run ' . runLabel($a) . ' · ' . ($all ? 'all attempts' : 'accepted work')
+        . ($no ? " · block $no" : '') . ' · ' . count($rows));
     sayHistory($rows);
     return 0;
 }
@@ -361,37 +361,37 @@ function cmdReport(array $f): int
     }
 
     $run = $a['run'] ?? [];
-    say('прогон ' . runLabel($a) . ' · ' . (RUN_WORDS[$run['state'] ?? ''] ?? ($run['state'] ?? '?'))
-        . ' · принято ' . (int) ($a['accepted'] ?? 0) . ' из ' . (int) ($a['total'] ?? 0)
-        . ((int) ($a['jobs'] ?? 0) ? ' · заявок ' . (int) $a['jobs'] : ''));
-    if ($byEngine) say("  работ worker: $byWorker · решений движка и шлюзов: $byEngine");
+    say('run ' . runLabel($a) . ' · ' . (RUN_WORDS[$run['state'] ?? ''] ?? ($run['state'] ?? '?'))
+        . ' · accepted ' . (int) ($a['accepted'] ?? 0) . ' of ' . (int) ($a['total'] ?? 0)
+        . ((int) ($a['jobs'] ?? 0) ? ' · jobs ' . (int) $a['jobs'] : ''));
+    if ($byEngine) say("  worker results: $byWorker · engine decisions and gateway transitions: $byEngine");
 
     $fast = 0;
     foreach ($a['steps'] ?? [] as $one) {
         $mark = match ((string) $one['state']) {
             'accepted' => '✓', 'returned' => '↩', 'failed' => '✗', 'cancelled' => '⊘', default => '·',
         };
-        $seconds = $one['seconds'] === null ? '' : ' · ' . secs((float) $one['seconds']) . ' с';
+        $seconds = $one['seconds'] === null ? '' : ' · ' . secs((float) $one['seconds']) . ' s';
         if (!empty($one['suspiciouslyFast'])) $fast++;
 
         say(sprintf('  %s %d.%d %s%s%s%s',
             $mark, (int) $one['no'], (int) $one['attempt'], (string) $one['title'], $seconds,
             trim((string) $one['result']) !== '' ? ' — ' . $one['result'] : '',
-            !empty($one['suspiciouslyFast']) ? '  · быстро, без содержательной проверки' : ''));
+            !empty($one['suspiciouslyFast']) ? '  · quick completion without a content review' : ''));
 
         // Возврат и провал без причины читать бессмысленно: она и есть суть строки.
         $error = trim((string) ($one['error'] ?? ''));
         if ($error !== '' && in_array((string) $one['state'], ['returned', 'failed', 'cancelled'], true)) {
-            say('      причина: ' . $error);
+            say('      reason: ' . $error);
         }
     }
 
     // Не обвинение, а наводка: быстро и без содержательной проверки.
     if ($fast) {
-        say("· быстрых шагов без содержательной проверки: $fast"
-            . ' — стоит глянуть, порог меняется флагом --slow N');
+        say("· quick steps without a content review: $fast"
+            . '. Review these steps. Use --slow N to change the threshold.');
     }
-    if (trim((string) ($run['summary'] ?? '')) !== '') say('итог: ' . $run['summary']);
+    if (trim((string) ($run['summary'] ?? '')) !== '') say('Summary: ' . $run['summary']);
     return 0;
 }
 
@@ -401,14 +401,14 @@ function cmdPace(array $f): int
     needServer('run.update');
     $pause = arg($f);
     if ($pause === null || !is_numeric($pause) || (float) $pause < 0) {
-        die_('goblin pace <секунды>   — 0 снимает паузу показа');
+        die_('goblin pace SECONDS. Use 0 to disable the display pause.');
     }
 
     $a = call('POST', 'run.update', runArgs($f) + ['pause' => (float) $pause], $f);
     $now = (float) ($a['run']['showPause'] ?? $pause);
     say($now > 0
-        ? '✓ пауза показа ' . secs($now) . ' с: каждый блок и стрелка держатся на холсте'
-        : '✓ пауза показа снята: прогон идёт на полной скорости');
+        ? '✓ Display pause: ' . secs($now) . ' s per block or arrow on the canvas'
+        : '✓ Display pause disabled.');
     return 0;
 }
 
@@ -438,20 +438,20 @@ function cmdGo(array $f): int
 
     // 1. Действие человека.
     if ($branch !== null) {
-        if (!in_array($branch, ['yes', 'no'], true)) die_('ветка ромба: yes или no');
+        if (!in_array($branch, ['yes', 'no'], true)) die_('Use yes or no to select a decision branch.');
         call('POST', 'step.decide', runArgs($f) + ['no' => $no, 'branch' => $branch, 'why' => $f['why'] ?? null], $f);
-        say("◆ ромб $no → " . ($branch === 'yes' ? 'да' : 'нет'));
+        say("◆ decision $no → " . ($branch === 'yes' ? 'yes' : 'no'));
     } else {
         $sent = array_values(array_filter($before['open'] ?? [], static fn($one) =>
             ($one['state'] ?? '') === 'submitted' && ($no === null || (string) $one['no'] === (string) $no)));
 
         if (count($sent) > 1) {
-            die_('сдано несколько шагов — скажи номер: goblin go ' . implode(' | ', array_column($sent, 'no')));
+            die_('Several results are ready. Choose a step: goblin go ' . implode(' | ', array_column($sent, 'no')));
         }
         if ($sent) {
             goAct($f, $sent[0]);
         } elseif (isset($f['return']) || $no !== null) {
-            die_('сданного шага' . ($no !== null ? " $no" : '') . ' нет — принимать и возвращать нечего');
+            die_('No submitted step' . ($no !== null ? " $no" : '') . ' to accept or return.');
         }
     }
 
@@ -476,9 +476,9 @@ function goAct(array $f, array $step): void
 
     if (isset($f['return'])) {
         $why = is_string($f['return']) ? $f['return'] : (string) ($f['why'] ?? '');
-        if (trim($why) === '') die_('скажи, что не так: goblin go --return «…»');
+        if (trim($why) === '') die_('Give a reason: goblin go --return REASON.');
         call('POST', 'step.return', runArgs($f) + ['step' => $step['id'], 'why' => $why], $f);
-        say("↩ возвращён $address: $why");
+        say("↩ returned $address: $why");
         return;
     }
     // Печатать приёмку здесь не нужно: следом идёт лента событий, и она
@@ -510,34 +510,34 @@ function goOn(array $f, int $sinceEvent = 0): int
         if (runNeedsAdvance($a, $advanceSeen)) continue;
 
         if (!$said && runPhase($a) === 'work') {
-            say('⏳ жду сдачу worker, до ' . $timeout . ' с (срок задаётся флагом --timeout)'
-                . ' — Ctrl+C не повредит прогону');
+            say('⏳ waiting for the worker, up to ' . $timeout . ' s (set with --timeout)'
+                . '. Ctrl+C stops this command and leaves the run active.');
             $said = true;
         }
 
         switch (runPhase($a)) {
             case 'done':
-                say('✓ прогон ' . runLabel($a) . ' пройден');
+                say('✓ run ' . runLabel($a) . ' completed');
                 return 0;
             case 'stopped':
-                say('■ прогон ' . runLabel($a) . ' ' . (RUN_WORDS[$a['run']['state']] ?? $a['run']['state']));
+                say('■ run ' . runLabel($a) . ' ' . (RUN_WORDS[$a['run']['state']] ?? $a['run']['state']));
                 return 5;
             case 'review':
                 sayReview($a, $f);
                 return 0;
             case 'human':
-                say('⚠ ' . ($a['run']['waitFor'] ?: 'нужен человек'));
+                say('⚠ ' . ($a['run']['waitFor'] ?: 'A person needs to act.'));
                 foreach ($a['ready'] as $item) {
-                    if (($item['type'] ?? '') === 'decision') say("  goblin go {$item['no']} yes|no --why «почему»");
+                    if (($item['type'] ?? '') === 'decision') say("  goblin go {$item['no']} yes|no --why REASON");
                 }
-                return driveExit(3, 'нужен leader');
+                return driveExit(3, 'The leader needs to act.');
             case 'dead':
-                say('⚠ ' . ($a['run']['waitFor'] ?: 'тупик: открыть нечего'));
-                return driveExit(6, 'тупик: открывать нечего');
+                say('⚠ ' . ($a['run']['waitFor'] ?: 'Run blocked: no steps are ready to open.'));
+                return driveExit(6, 'Run blocked: no steps are ready to open.');
         }
         if (time() - $moved > $timeout) {
-            say('⚠ worker молчит ' . howLong(time() - $moved) . ': ' . waitingOn($a));
-            return driveExit(4, 'worker молчит');
+            say('⚠ no response from the worker for ' . howLong(time() - $moved) . ': ' . waitingOn($a));
+            return driveExit(4, 'No response from the worker.');
         }
     }
 }
@@ -550,19 +550,19 @@ function sayReview(array $a, array $f): void
         $r = reviewOf($a, $step, $f);
 
         say('');
-        say("⌛ сдан {$step['no']}.{$step['attempt']}" . ($r['title'] !== '' ? " «{$r['title']}»" : ''));
-        if ($r['spec'] !== '') say("ТЗ:\n" . preg_replace('/^/m', '  ', mb_strimwidth($r['spec'], 0, 1200, ' …')));
-        if ($r['input'] !== '') say("вход: {$r['input']}");
+        say("⌛ submitted {$step['no']}.{$step['attempt']}" . ($r['title'] !== '' ? " «{$r['title']}»" : ''));
+        if ($r['spec'] !== '') say("Task specification:\n" . preg_replace('/^/m', '  ', mb_strimwidth($r['spec'], 0, 1200, ' …')));
+        if ($r['input'] !== '') say("Input: {$r['input']}");
         if ($r['vars']) {
-            say('переменные входа: ' . implode(' ', array_map(
+            say('Input variables: ' . implode(' ', array_map(
                 static fn($k, $v) => "$k=$v", array_keys($r['vars']), $r['vars'])));
         }
-        say("результат: {$r['result']}");
-        foreach ($r['files'] as $file) say('  файл: ' . (is_array($file) ? ($file['path'] ?? json_encode($file, JSON_UNESCAPED_UNICODE)) : $file));
-        say('проверки: ' . ($r['checks'] !== '' ? $r['checks'] : 'сервер не прислал'));
+        say("Result: {$r['result']}");
+        foreach ($r['files'] as $file) say('  File: ' . (is_array($file) ? ($file['path'] ?? json_encode($file, JSON_UNESCAPED_UNICODE)) : $file));
+        say('Checks: ' . ($r['checks'] !== '' ? $r['checks'] : 'unavailable'));
     }
     say('');
-    say('дальше: goblin go · goblin go --return «что не так»');
+    say('Next: goblin go or goblin go --return REASON');
 }
 
 /**
@@ -627,10 +627,10 @@ function answerHint(string $answer): string
 
     $names = array_unique($found[1]);
     return $answer . "\n"
-        . (count($names) > 1 ? 'Вместо ' : 'Вместо ')
-        . '{' . implode('}, {', $names) . '} подставь '
-        . (count($names) > 1 ? 'свои числа' : 'своё число')
-        . ' — фигурные скобки в ответе не пишутся.';
+        . (count($names) > 1 ? 'Replace ' : 'Replace ')
+        . '{' . implode('}, {', $names) . '} with '
+        . (count($names) > 1 ? 'your numbers' : 'your number')
+        . '. Omit the braces in the answer.';
 }
 
 /**
@@ -647,7 +647,7 @@ function waitWithin(int $moved, int $timeout): int
  * Чего ждём, когда сервер молчит.
  *
  * `wait_for` пуст, пока движку нечего делать: шаг выдан и должен быть у worker.
- * Раньше строка «worker молчит 25с:» обрывалась пустотой и не называла шаг.
+ * Раньше строка «No response from the worker. 25с:» обрывалась пустотой и не называла шаг.
  */
 function waitingOn(array $a): string
 {
@@ -657,17 +657,17 @@ function waitingOn(array $a): string
     $open = [];
     foreach ($a['open'] ?? [] as $one) {
         $open[] = "{$one['no']}.{$one['attempt']} — " . (STEP_WORDS[$one['state']] ?? $one['state'])
-            . (!empty($one['agent']) ? " · агент {$one['agent']}" : '');
+            . (!empty($one['agent']) ? " · agent {$one['agent']}" : '');
     }
     return $open
-        ? 'шаг у worker: ' . implode(', ', $open)
-        : 'открытых шагов нет — посмотри goblin state';
+        ? 'Worker step: ' . implode(', ', $open)
+        : 'No open steps. See goblin state.';
 }
 
-/** Последняя строка drive: код выхода цифрой и словом. */
+/** Последняя строка drive: exit code цифрой и словом. */
 function driveExit(int $code, string $why): int
 {
-    say("код выхода $code — $why");
+    say("exit code $code — $why");
     return $code;
 }
 
@@ -696,7 +696,7 @@ function checksLine($checks): string
     $out = [];
     foreach ($checks as $name => $one) {
         $out[] = is_array($one)
-            ? trim(($one['name'] ?? $name) . ' — ' . (($one['ok'] ?? null) === true ? 'да' : (($one['ok'] ?? null) === false ? 'нет' : '?'))
+            ? trim(($one['name'] ?? $name) . ' — ' . (($one['ok'] ?? null) === true ? 'yes' : (($one['ok'] ?? null) === false ? 'no' : '?'))
                 . (!empty($one['why']) ? " ({$one['why']})" : ''))
             : (is_string($name) ? "$name — $one" : (string) $one);
     }
@@ -743,18 +743,18 @@ function cmdDrive2(array $f): int
         /* Код выхода несёт смысл, а видно его только через $?: называем его
            и словами. Агенту-leader это экономит лишний разбор вывода. */
         switch (runPhase($a)) {
-            case 'done':    say('✓ ' . runLabel($a) . ' пройден'); return driveExit(0, 'прогон пройден');
+            case 'done':    say('✓ ' . runLabel($a) . ' completed'); return driveExit(0, 'Run completed.');
             case 'stopped': say('■ ' . runLabel($a) . ' ' . (RUN_WORDS[$a['run']['state']] ?? $a['run']['state']));
-                            return driveExit(5, 'прогон не идёт');
+                            return driveExit(5, 'The run is inactive.');
             case 'review':
-            case 'human':   say('⚠ ' . ($a['run']['waitFor'] ?: 'нужен человек'));
-                            return driveExit(3, 'нужен leader');
-            case 'dead':    say('⚠ ' . ($a['run']['waitFor'] ?: 'тупик: открыть нечего'));
-                            return driveExit(6, 'тупик: открывать нечего');
+            case 'human':   say('⚠ ' . ($a['run']['waitFor'] ?: 'A person needs to act.'));
+                            return driveExit(3, 'The leader needs to act.');
+            case 'dead':    say('⚠ ' . ($a['run']['waitFor'] ?: 'Run blocked: no steps are ready to open.'));
+                            return driveExit(6, 'Run blocked: no steps are ready to open.');
         }
         if (time() - $moved > $timeout) {
-            say('⚠ worker молчит ' . howLong(time() - $moved) . ': ' . waitingOn($a));
-            return driveExit(4, 'worker молчит');
+            say('⚠ no response from the worker for ' . howLong(time() - $moved) . ': ' . waitingOn($a));
+            return driveExit(4, 'No response from the worker.');
         }
     }
 }
@@ -777,11 +777,11 @@ function cmdWorkRoute(array $f): int
         /* Кончился прогон только в этих состояниях. Пауза обратима: leader сделает
            resume, и работа придёт — уходить из круга нельзя (код 3 = «работы пока нет»). */
         if (in_array($where, ['done', 'stopped', 'failed'], true)) {
-            say('прогон закрыт: работа больше не придёт');
+            say('The run is closed. No more work will arrive.');
             return 0;
         }
         if ($where === 'paused') {
-            say('прогон на паузе — работа появится, когда leader продолжит');
+            say('The run is paused. The leader must resume it before more work can arrive.');
             return 3;
         }
         return (int) ($state['run']['engine'] ?? 1) === 1
@@ -814,7 +814,7 @@ function cmdWork2(array $f): int
 function workTake(array $f): int
 {
     $agent = is_string($f['token'] ?? null) ? $f['token'] : cfg('agent');
-    if ($agent === '') die_('нужен пропуск агента: export GOBLIN_AGENT=gba_…');
+    if ($agent === '') die_('Set the worker pass: export GOBLIN_AGENT=gba_…');
     $session = workerSession($f, true);
 
     // Только пропуском агента: пропуск шага из кэша или окружения тут не годится.
@@ -836,7 +836,7 @@ function workTake(array $f): int
             // секрет строго для прежних run/step и той же worker session.
             $restore = ['wait' => 0, 'session' => $session, 'run' => $run, 'step' => $step];
             $a = quiet(static fn() => call('POST', 'step.take', $restore, $auth, 15));
-            if ($a === null) die_('команда выполнена, но доступ к прежнему шагу не восстановлен: '
+            if ($a === null) die_('The command completed, but access to the previous step could not be restored: '
                 . lastFail()->getMessage(), lastFail()->why, 3);
         }
     }
@@ -844,7 +844,7 @@ function workTake(array $f): int
         $why = lastFail()->why;
         if (in_array($why, ['unauthorized', 'not_found'], true)) {
             stepCacheForget($f);
-            die_('доступ к серверу или прогону потерян; исход неизвестен: ' . lastFail()->getMessage(), $why, 2);
+            die_('The server or run is unreachable. The outcome is unknown: ' . lastFail()->getMessage(), $why, 2);
         }
         die_(lastFail()->getMessage(), $why, $why === 'network' ? 2 : 1);
     }
@@ -853,21 +853,21 @@ function workTake(array $f): int
        Раньше в тексте его не было, и два похожих исхода читались одинаково. */
     if (empty($a['ready'])) {
         if (!empty($a['running'])) {
-            say('работы пока нет — зови goblin work снова (код 3)');
+            say('No work yet. Run goblin work again (exit 3).');
             return 3;
         }
         stepCacheForget($f);
-        say('прогонов больше нет — работа окончена (код 0)');
+        say('No runs remain. Work is complete (exit 0).');
         return 0;
     }
 
     $step  = $a['step'] ?? [];
     $token = (string) ($step['token'] ?? '');
-    if ($token === '') die_('сервер выдал шаг без пропуска (step.token)');
+    if ($token === '') die_('The server issued a step without a pass (step.token).');
     if (isset($f['id']) && is_string($f['id']) && ctype_digit(trim($f['id']))) {
         $asked = (int) trim($f['id']);
         if ($asked !== (int) ($step['run'] ?? 0)) {
-            die_('сервер выдал шаг другого прогона — секрет не сохранён', 'scope_mismatch');
+            die_('The server returned a step from another run. The pass was discarded.', 'scope_mismatch');
         }
     }
     stepCacheKeep($token, [
@@ -876,9 +876,9 @@ function workTake(array $f): int
         'step' => (int) ($step['id'] ?? 0),
     ], $f);
 
-    say('→ твой шаг ' . ($step['address'] ?? "{$step['no']}.{$step['attempt']}")
+    say('→ your step ' . ($step['address'] ?? "{$step['no']}.{$step['attempt']}")
         . (!empty($step['title']) ? ": {$step['title']}" : ''));
-    say('пропуск шага сохранён в закрытом кэше worker session');
+    say('Step pass saved to the private worker session cache.');
     if (!empty($f['raw'])) {
         say(json_encode($a['package'] ?? [], JSON_UNESCAPED_UNICODE));
         return 0;
@@ -906,49 +906,49 @@ function sayPackageHead(array $p, bool $brief = false): void
         : inputLine($p['input'] ?? '');
 
     say('');
-    say('── коротко ──────────────────────────────────');
+    say('── Summary ──────────────────────────────────');
     // Адрес шага стоит выше рамки, но в кратком выводе он нужен и внутри.
-    if (!empty($p['address']))                    say('шаг:     ' . $p['address']
+    if (!empty($p['address']))                    say('Step:     ' . $p['address']
         . (!empty($p['element']['title']) ? ' · ' . $p['element']['title'] : ''));
     // Пустая строка читалась как потерянное поле: у первого шага входа и правда нет.
-    say('вход:    ' . (trim($line) !== '' ? $line : 'нет — это первый шаг'));
+    say('Input:    ' . (trim($line) !== '' ? $line : 'This is the first step.'));
     // Пустую строку читают как потерянное поле: говорим прямо, что образца нет.
     if (trim((string) ($p['answer'] ?? '')) !== '') {
         foreach (explode("\n", answerHint((string) $p['answer'])) as $i => $row) {
-            say(($i === 0 ? 'образец: ' : '         ') . $row);
+            say(($i === 0 ? 'Answer format: ' : '         ') . $row);
         }
     } else {
-        say('образец: не задан — сдавай так, как велит ТЗ');
+        say('Follow the task specification for the answer format.');
     }
     $why = trim((string) ($p['previous']['why'] ?? ''));
-    if ($why !== '')                              say('вернули: ' . $why);
+    if ($why !== '')                              say('Returned: ' . $why);
     // Слово leader важнее всего остального: оно новее задания.
     foreach ($p['said'] ?? [] as $one)            say('leader: ' . ($one['text'] ?? ''));
     /* Инструкцию называем в начале прогона: на седьмом шаге подряд эта строка
        уже шум. Пустой список принятого — верный признак первого шага. */
-    if (empty($p['earlier'])) say('инструкция worker: goblin help worker');
-    if ($brief) say('полное задание с ТЗ: goblin task');
+    if (empty($p['earlier'])) say('Worker instructions: goblin help worker');
+    if ($brief) say('Full task specification: goblin task');
     say('─────────────────────────────────────────────');
 }
 
 /** Пакет задания по-человечески (md_backend/ru/progon.md). */
 function sayPackage(array $p): void
 {
-    say("Рабочая папка: " . ($p['workDir'] ?? '?') . "   результат класть в: " . ($p['outDir'] ?? '?'));
+    say("Working folder: " . ($p['workDir'] ?? '?') . "   result folder: " . ($p['outDir'] ?? '?'));
 
     $spec = textOf($p['spec'] ?? '');
-    if ($spec !== '') say("\n## ТЗ\n$spec");
+    if ($spec !== '') say("\n## Task specification\n$spec");
 
     if (!empty($p['context'])) {
-        say("\n## Контекст");
+        say("\n## Context");
         foreach ($p['context'] as $item) say('— ' . ($item['title'] ?? '') . ': ' . textOf($item['text'] ?? $item));
     }
 
     // Входные материалы блока: без них worker не знает, с какими файлами работать.
     if (!empty($p['inputs'])) {
-        say("\n## Входы");
+        say("\n## Inputs");
         foreach ($p['inputs'] as $item) {
-            $where = !empty($item['uri']) ? (string) $item['uri'] : (!empty($item['file']) ? 'файл' : '');
+            $where = !empty($item['uri']) ? (string) $item['uri'] : (!empty($item['file']) ? 'file' : '');
             say('— ' . ($item['title'] ?? '') . ($where !== '' ? ": $where" : ''));
         }
     }
@@ -956,41 +956,41 @@ function sayPackage(array $p): void
     /* Три названия одного и того же сбивали worker: «Вход» — это откуда
        пришёл жетон, а работать надо с числами, которые сервер уже разобрал. */
     $input = inputLine($p['input'] ?? '');
-    if ($input !== '') say("\n## Пришло по стрелке\n$input");
+    if ($input !== '') say("\n## Results from incoming arrows\n$input");
     if (!empty($p['vars'])) {
-        say("\n## Твой вход — считай от этих чисел\n" . implode(' ', array_map(
+        say("\n## Input values for calculations\n" . implode(' ', array_map(
             static fn($k, $v) => "$k=$v", array_keys((array) $p['vars']), (array) $p['vars'])));
     }
 
     /* Уже принятое в прогоне. ТЗ схем ссылаются на этот раздел прямым текстом
        («возьми числа из раздела Уже принято»), а на engine 2 его не печатали. */
     if (!empty($p['earlier'])) {
-        say("\n## Уже принято — справка, разбирать её руками не нужно");
+        say("\n## Previously accepted work (reference)");
         foreach ($p['earlier'] as $item) {
             say('— ' . ($item['no'] ?? '?') . ' ' . ($item['title'] ?? '') . ': ' . ($item['result'] ?? ''));
         }
     }
 
-    if (trim((string) ($p['answer'] ?? '')) !== '') say("\n## Образец ответа\n" . answerHint((string) $p['answer']));
-    if (!empty($p['accept'])) say("\n## Должно быть\n— " . implode("\n— ", (array) $p['accept']));
-    if (!empty($p['reject'])) say("\n## Не должно быть\n— " . implode("\n— ", (array) $p['reject']));
+    if (trim((string) ($p['answer'] ?? '')) !== '') say("\n## Answer format\n" . answerHint((string) $p['answer']));
+    if (!empty($p['accept'])) say("\n## Requirements\n— " . implode("\n— ", (array) $p['accept']));
+    if (!empty($p['reject'])) say("\n## Disqualifying conditions\n— " . implode("\n— ", (array) $p['reject']));
 
     sayPackageLimits($p['limits'] ?? []);
     sayPackageAgent($p['agent'] ?? null);
 
     // Общая картина папки приходит, только если человек включил share_scheme.
     if (!empty($p['scheme'])) {
-        say("\n## Общая картина папки");
+        say("\n## Scheme overview");
         foreach ($p['scheme'] as $item) {
             say(($item['type'] ?? '') === 'arrow'
-                ? '— ' . ($item['no'] ?? '?') . ' стрелка ' . ($item['from'] ?? '?') . ' → ' . ($item['to'] ?? '?')
+                ? '— ' . ($item['no'] ?? '?') . ' arrow ' . ($item['from'] ?? '?') . ' → ' . ($item['to'] ?? '?')
                     . (!empty($item['branch']) ? " [{$item['branch']}]" : '')
                 : '— ' . ($item['no'] ?? '?') . ' ' . ($item['type'] ?? '') . ': ' . ($item['title'] ?? ''));
         }
     }
 
     $why = trim((string) ($p['previous']['why'] ?? ''));
-    if ($why !== '') say("\n## Прошлую попытку вернули\n$why");
+    if ($why !== '') say("\n## Feedback on the previous attempt\n$why");
 
     /* Записка leader шагу. Печаталась только старым печатником `goblin task`,
        а на engine 2 worker её не видел вовсе — хотя пишут её именно ему.
@@ -1001,19 +1001,19 @@ function sayPackage(array $p): void
         if ($row === '' || str_starts_with($row, 'leader:')) continue;
         $note[] = $row;
     }
-    if ($note) say("\n## Подсказка leader\n" . implode(' ', $note));
+    if ($note) say("\n## Leader note\n" . implode(' ', $note));
 
     // Сказанное вслух после выдачи шага: `goblin say` у leader.
     if (!empty($p['said'])) {
-        say("\n## leader говорит");
+        say("\n## Messages from the leader");
         foreach ($p['said'] as $one) {
             say('— ' . (BY_WORDS[$one['by'] ?? ''] ?? ($one['by'] ?? '')) . ': ' . ($one['text'] ?? ''));
         }
     }
 
-    if (!empty($p['stop'])) say("\n⚠ человек попросил остановиться: сделай goblin fail --reason cancelled");
+    if (!empty($p['stop'])) say("\n⚠ Stop requested. Use goblin fail --reason cancelled.");
 
-    say("\nСдать: goblin submit --result «одна строка» [файл=выход …] [--next]");
+    say("\nSubmit: goblin submit --result 'one line' [FILE=OUTPUT ...] [--next]");
 }
 
 /** Пределы шага: обязательные выходы, срок и лимит платных вызовов. */
@@ -1022,25 +1022,25 @@ function sayPackageLimits(array $limits): void
     $lines = [];
 
     if (!empty($limits['outputs'])) {
-        $lines[] = 'обязательные выходы: ' . implode(', ', (array) $limits['outputs']);
+        $lines[] = 'required outputs: ' . implode(', ', (array) $limits['outputs']);
     }
     if (($limits['timeout'] ?? null) !== null && (int) $limits['timeout'] > 0) {
-        $lines[] = 'срок: ' . (int) $limits['timeout'] . ' с';
+        $lines[] = 'time limit: ' . (int) $limits['timeout'] . ' s';
     }
     if (isset($limits['paidCalls'])) {
-        $lines[] = 'платных вызовов не больше: ' . (int) $limits['paidCalls']
-            . ' (заявка — goblin job add … до обращения к сервису)';
+        $lines[] = 'paid call limit: ' . (int) $limits['paidCalls']
+            . ' (record each request with goblin job add before calling the service)';
     }
 
     // Последняя попытка — повод не гадать, а спросить: goblin fail --blocker.
     $max = (int) ($limits['maxAttempts'] ?? 0);
     $now = (int) ($limits['attempt'] ?? 0);
     if ($max > 0) {
-        $lines[] = "выдач у этого блока: $now из $max"
-            . ($now >= $max ? ' — попытка последняя' : '');
+        $lines[] = "attempts for this block: $now of $max"
+            . ($now >= $max ? ' (last attempt)' : '');
     }
 
-    if ($lines) say("\n## Пределы\n— " . implode("\n— ", $lines));
+    if ($lines) say("\n## Limits\n— " . implode("\n— ", $lines));
 }
 
 /** Карточка агента: чем работать, какой моделью и с каким усилием. */
@@ -1049,11 +1049,11 @@ function sayPackageAgent(?array $agent): void
     if (!$agent) return;
 
     $lines = array_filter([
-        trim((string) ($agent['cli'] ?? '')) !== '' ? 'чем: ' . $agent['cli'] : null,
-        trim((string) ($agent['model'] ?? '')) !== '' ? 'модель: ' . $agent['model'] : null,
-        trim((string) ($agent['effort'] ?? '')) !== '' ? 'усилие: ' . $agent['effort'] : null,
+        trim((string) ($agent['cli'] ?? '')) !== '' ? 'CLI: ' . $agent['cli'] : null,
+        trim((string) ($agent['model'] ?? '')) !== '' ? 'model: ' . $agent['model'] : null,
+        trim((string) ($agent['effort'] ?? '')) !== '' ? 'effort: ' . $agent['effort'] : null,
     ]);
     if (!$lines) return;
 
-    say("\n## Кем работать: " . ($agent['name'] ?? '') . "\n— " . implode("\n— ", $lines));
+    say("\n## Assigned worker: " . ($agent['name'] ?? '') . "\n— " . implode("\n— ", $lines));
 }

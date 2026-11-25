@@ -54,7 +54,7 @@ export async function render(root, route) {
     const a = el('a', 'grow', p.title || p.url_key);
     a.href = '#projects/' + p.id;
     const open = el('a', 'adm-faint', '↗');
-    open.href = editorUrl(p.url_key);
+    open.href = p.editorUrl || editorUrl(p.url_key);
     open.target = '_blank';
     open.title = t('admin.overview.open_editor');
     return el('div', '', [a, el('span', 'adm-faint', p.owner || t('admin.w.guest')), el('span', 'adm-faint', fmt.ago(p.updated_at)), open]);

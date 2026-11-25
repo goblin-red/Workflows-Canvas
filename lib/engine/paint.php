@@ -50,7 +50,7 @@ function runPaintShape(array $run): array
 
     $steps = dbAll('SELECT * FROM run_steps WHERE run_id = ? ORDER BY id', [$runId]);
     $marks = dbAll('SELECT * FROM run_marks WHERE run_id = ? ORDER BY id', [$runId]);
-    $graph = engineGraph((int) $run['folder_id']);
+    $graph = runScene($run);
 
     $answer['blocks'] = paintBlocks($run, $steps, $graph, runReady($run, $steps, $graph));
     $answer['edges']  = paintEdges($marks);
@@ -74,7 +74,7 @@ function paintBlocks(array $run, array $steps, array $graph, array $ready): arra
     $last = [];
     $round = [];
     foreach ($steps as $step) {
-        $id = (int) $step['element_id'];
+        $id = (int) historyNode($step);
         if (!$id) continue;
         if ($step['state'] === 'accepted') $round[$id] = ($round[$id] ?? 0) + 1;
         if (!isset($last[$id]) || (int) $step['attempt'] >= (int) $last[$id]['attempt']) $last[$id] = $step;
@@ -101,7 +101,13 @@ function paintBlocks(array $run, array $steps, array $graph, array $ready): arra
         ];
         if ($state === 'ready') $one['wait'] = paintWait($run, $graph, $id);
         if (isset($covers[$id])) $one['cover'] = $covers[$id];
-        if ($state === 'accepted' && ($branch = paintBranch($graph, $step))) $one['branch'] = $branch;
+        if ($state === 'accepted' && ($branch = paintBranch($graph, $step)) !== null) {
+            $one['branch'] = $branch;
+            if (!empty($step['block_id'])) {
+                $one['chosen'] = historyChosen($step);
+                $one['branchLabel'] = branchLabel($graph['edges'][$one['chosen']]);
+            }
+        }
         if (in_array($state, ['returned', 'failed', 'cancelled'], true) && (string) $step['error'] !== '') {
             $one['error'] = mb_substr((string) $step['error'], 0, 200);
         }
@@ -126,7 +132,7 @@ function paintWait(array $run, array $graph, int $id): string
     if ($node['type'] === 'gateway') return 'pass';
     if (graphStarter($graph) === $id) return 'pause';
     // Те же причины, по которым advanceIssue не выдаёт готовый блок.
-    $stuck = taskText($id) === ''
+    $stuck = runTaskText($graph, $id) === ''
         || stepOverLimit((int) $run['id'], (int) $node['no'], graphMaxAttempts($graph, $id));
     return $stuck ? 'person' : 'pause';
 }
@@ -139,7 +145,7 @@ function paintWait(array $run, array $graph, int $id): string
 function paintCovers(int $runId): array
 {
     $rows = dbAll(
-        "SELECT s.element_id, l.asset_id, a.uri, a.file_key FROM asset_links l
+        "SELECT s.element_id, s.block_id, l.asset_id, a.uri, a.file_key FROM asset_links l
            JOIN assets a ON a.id = l.asset_id
            JOIN run_steps s ON s.id = l.step_id
           WHERE s.run_id = ? AND s.state = 'accepted' AND l.role = 'result' AND " . STEP_PICTURE_SQL . "
@@ -148,9 +154,9 @@ function paintCovers(int $runId): array
     );
     $out = [];
     foreach ($rows as $row) {
-        if ($row['element_id'] === null) continue;
+        if (historyNode($row) === null) continue;
         // Картинка у агента в вебе: браузеру нужен её путь — он возьмёт её из подключённой папки.
-        $out[(int) $row['element_id']] = assetAtAgentUri($row['file_key'], $row['uri'])
+        $out[historyNode($row)] = assetAtAgentUri($row['file_key'], $row['uri'])
             ? ['asset' => (int) $row['asset_id'], 'uri' => (string) $row['uri'], 'agent' => true]
             : (int) $row['asset_id'];
     }
@@ -167,16 +173,16 @@ function paintKind(array $graph, int $id): string
 /** Ветка решённого ромба: yes | no по выбранной стрелке, иначе null. */
 function paintBranch(array $graph, array $step): ?string
 {
-    $chosen = (int) ($step['chosen_edge_id'] ?? 0);
+    $chosen = (int) historyChosen($step);
     $branch = $chosen ? (string) ($graph['edges'][$chosen]['branch'] ?? '') : '';
-    return in_array($branch, ['yes', 'no'], true) ? $branch : null;
+    return $branch !== '' ? $branch : null;
 }
 
 /** Стрелки: лежит жетон — горит; все забраны — пройдена. */
 function paintEdges(array $marks): array
 {
     $onEdge = [];
-    foreach ($marks as $mark) $onEdge[(int) $mark['edge_id']][] = $mark;
+    foreach ($marks as $mark) $onEdge[historyArrow($mark)][] = $mark;
 
     $out = [];
     foreach ($onEdge as $edgeId => $rows) {

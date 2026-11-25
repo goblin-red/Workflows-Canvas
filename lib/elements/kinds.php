@@ -11,64 +11,64 @@ declare(strict_types=1);
 
 const KINDS = [
     'block' => [
-        'title'     => 'блок',
-        'about'     => 'работа, её делает агент',
+        'title'     => 'block',
+        'about'     => 'work performed by an agent',
         'agent'     => true,     // можно назначить агента
         'step'      => true,     // бывает шагом прогона
         'spec'      => true,     // бывает ТЗ
         'container' => false,
     ],
     'decision' => [
-        'title'     => 'ромб',
-        'about'     => 'развилка: leader выбирает ветку',
+        'title'     => 'decision',
+        'about'     => 'a decision point where the leader chooses a branch',
         'agent'     => false,
         'step'      => true,
         'spec'      => true,     // ТЗ ромба — это критерий выбора
         'container' => false,
     ],
     'gateway' => [
-        'title'     => 'шлюз',
-        'about'     => 'дверь в другую папку',
+        'title'     => 'gateway',
+        'about'     => 'a gateway to another folder',
         'agent'     => false,
         'step'      => true,
         'spec'      => false,
         'container' => false,
     ],
     'arrow' => [
-        'title'     => 'стрелка',
-        'about'     => 'переход от элемента к элементу',
+        'title'     => 'arrow',
+        'about'     => 'a connection from one element to another',
         'agent'     => false,
         'step'      => false,
         'spec'      => false,
         'container' => false,
     ],
     'group' => [
-        'title'     => 'группа',
-        'about'     => 'рамка: держит элементы, области и группы',
+        'title'     => 'group',
+        'about'     => 'a container for elements, areas and groups',
         'agent'     => false,
         'step'      => false,
         'spec'      => true,     // ТЗ группы приходит участнику как контекст
         'container' => true,
     ],
     'area' => [
-        'title'     => 'область',
-        'about'     => 'полоса или зона: держит элементы, как группа',
+        'title'     => 'area',
+        'about'     => 'a lane or zone that contains elements',
         'agent'     => false,
         'step'      => false,
         'spec'      => true,
         'container' => true,
     ],
     'note' => [
-        'title'     => 'пометка',
-        'about'     => 'надпись или черта',
+        'title'     => 'note',
+        'about'     => 'a note or divider',
         'agent'     => false,
         'step'      => false,
         'spec'      => false,
         'container' => false,
     ],
     'table' => [
-        'title'     => 'таблица',
-        'about'     => 'ряды и столбцы: матрица ответственности, список признаков',
+        'title'     => 'table',
+        'about'     => 'rows and columns for organizing information',
         'agent'     => false,
         'step'      => false,
         'spec'      => true,     // к таблице бывает пояснение
@@ -77,8 +77,8 @@ const KINDS = [
     // Ярлык — тематическая связь «это связано вон с тем», а не переход.
     // Прогон его не видит: граф прогона строится только из стрелок.
     'link' => [
-        'title'     => 'ярлык',
-        'about'     => 'ссылка на связанный объект, в том числе в другой папке',
+        'title'     => 'shortcut',
+        'about'     => 'a shortcut to a related object, including in another folder',
         'agent'     => false,
         'step'      => false,
         'spec'      => false,

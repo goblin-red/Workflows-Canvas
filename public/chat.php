@@ -50,14 +50,14 @@ header('Content-Type: text/html; charset=utf-8');
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<!-- Тема — как в редакторе и админке: выбор человека в этом браузере (goblin-theme), до первой отрисовки. -->
+<!-- Apply the saved theme before the page is rendered. -->
 <script>try { const theme = localStorage.getItem('goblin-theme'); if (theme) document.documentElement.dataset.theme = theme; } catch {}</script>
 <title><?= h($data['title']) ?> · Goblin</title>
 <link rel="stylesheet" href="css/tokens.css?v=<?= $version ?>">
 <link rel="stylesheet" href="css/base.css?v=<?= $version ?>">
 <link rel="stylesheet" href="css/panel.css?v=<?= $version ?>">
 <style>
-  /* base.css держит страницу редактора без прокрутки — здесь обычная длинная страница. */
+  /* Allow this standalone chat page to scroll. */
   html,body{height:auto;overscroll-behavior:auto}
   body{background:var(--bg);color:var(--ink);margin:0;overflow:auto}
   .chat-page{max-width:860px;margin:0 auto;padding:32px 20px 60px}

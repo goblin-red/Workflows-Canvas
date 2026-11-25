@@ -13,11 +13,6 @@ if (!installNeeded()) {
     http_response_code(404);
     exit;
 }
-// Язык страницы — ссылкой ?lang=, дальше помнит cookie (как у всего Гоблина).
-if (in_array($_GET['lang'] ?? '', LANGS, true)) {
-    setcookie('goblin_lang', $_GET['lang'], ['expires' => time() + 31536000, 'path' => '/', 'samesite' => 'Lax']);
-    $_COOKIE['goblin_lang'] = $_GET['lang'];
-}
 
 $checks = installChecks();
 $ready = !in_array(false, array_column($checks, 'ok'), true);
@@ -76,7 +71,6 @@ $site = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'h
 </head>
 <body>
 <main>
-  <nav class="langs"><a href="?lang=ru">Русский</a><a href="?lang=en">English</a></nav>
   <h1><?= h(t('install.title')) ?></h1>
   <p class="lead"><?= h(t('install.lead')) ?></p>
 
@@ -148,7 +142,7 @@ $site = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'h
       <h2><?= h(t('install.admin')) ?></h2>
       <div class="row">
         <label class="field"><span><?= h(t('install.admin_login')) ?></span><input class="input" name="admin_login" value="<?= $v('admin_login', 'admin') ?>" required></label>
-        <label class="field"><span><?= h(t('install.admin_pass')) ?></span><input class="input" type="password" name="admin_pass" minlength="8" required autocomplete="new-password"></label>
+        <label class="field"><span><?= h(t('install.admin_pass')) ?></span><input class="input" type="password" name="admin_pass" autocomplete="new-password"></label>
       </div>
       <p class="hint"><?= h(t('install.admin_hint')) ?></p>
     </section>
@@ -167,8 +161,8 @@ $site = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'h
 <?php endif; ?>
 </main>
 <script>
-  // Видны только поля выбранного: «на этом компьютере» — как запускать; база — свои поля.
-  // По умолчанию: на этом компьютере — SQLite, на сайте — MySQL (пока человек не выбрал базу сам).
+  // Show settings for the selected installation and database.
+  // Default to SQLite locally and MySQL on a hosted server until a database is chosen.
   const form = document.getElementById('install');
   let pickedDb = <?= isset($in['driver']) ? 'true' : 'false' ?>;
   const sync = () => {

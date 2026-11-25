@@ -3,10 +3,8 @@
    Не делает: ничего не рисует и не хранит — берёт то, что уже открыто,
    и отдаёт браузеру готовый файл.
 
-   Шесть способов сохранить и два открыть — ровно как было в прежнем Гоблине:
-   .gbl — весь проект строками базы, .canvas — Obsidian, HTML и PDF — плоский
-   вид текущей папки, .md — Mermaid в две стороны. Картинка для HTML и PDF
-   рисуется одной и той же сценой, поэтому они всегда совпадают. */
+   .gbl — весь проект, .canvas — Obsidian, .md — Mermaid. HTML и PDF
+   сохраняют текущую папку в плоском или полноцветном виде. */
 
 import { state } from 'goblin/core/state.js';
 import * as api from 'goblin/api/client.js';
@@ -15,13 +13,14 @@ import { loadProject, loadFolder } from 'goblin/api/sync.js';
 import { toast } from 'goblin/shell/topbar.js';
 import { t, lang } from 'goblin/core/i18n.js';
 import { renderScheme, schemeSnapshot } from 'goblin/embed/render.js';
+import { pictureSnapshot, pictureHtml, picturePng } from 'goblin/shell/picture-color.js';
 
 export const SAVE_KINDS = [
   { key: 'html-minimal', icon: '</>', title: t('editor.files.save_html_min') },
   { key: 'gbl',        icon: '⤓',  title: t('editor.files.save_gbl') },
   { key: 'canvas',     icon: '⤓',  title: t('editor.files.save_canvas') },
-  { key: 'html',       icon: '</>', title: t('editor.files.save_html') },
-  { key: 'pdf',        icon: '📄', title: t('editor.files.save_pdf') },
+  { key: 'html',       icon: '</>', title: t('editor.files.save_html'), colorKey: 'html-color' },
+  { key: 'pdf',        icon: '📄', title: t('editor.files.save_pdf'), colorKey: 'pdf-color' },
   { key: 'mermaid-lr', icon: '▭',  title: t('editor.files.save_mermaid_lr') },
   { key: 'mermaid-tb', icon: '▯',  title: t('editor.files.save_mermaid_tb') },
 ];
@@ -40,16 +39,30 @@ export function openFilesWindow(what) {
   const save = what === 'save';
   const dialog = document.getElementById('dialog-files');
   const body = document.getElementById('dialog-files-body');
+  const styleOptions = document.getElementById('dialog-files-style');
+  const colorChoice = styleOptions.querySelector('input[value="color"]');
   document.getElementById('dialog-files-title').textContent = save ? t('common.save') : t('editor.files.open');
+  styleOptions.hidden = !save;
 
   body.textContent = '';
   for (const kind of (save ? SAVE_KINDS : OPEN_KINDS)) {
     const row = document.createElement('button');
+    row.type = 'button';
     row.className = 'file-row';
-    row.innerHTML = `<b>${escapeText(kind.icon)}</b><span>${escapeText(kind.title)}</span>`;
-    row.onclick = () => { dialog.close(); (save ? saveAs : openAs)(kind.key); };
+    row.dataset.fileKind = kind.key;
+    row.innerHTML = `<b aria-hidden="true">${escapeText(kind.icon)}</b><span>${escapeText(kind.title)}</span>`;
+    row.onclick = () => {
+      dialog.close();
+      if (!save) return openAs(kind.key);
+      return saveAs(colorChoice.checked && kind.colorKey ? kind.colorKey : kind.key);
+    };
     body.append(row);
   }
+  const pdfLabel = body.querySelector('[data-file-kind="pdf"] span');
+  styleOptions.onchange = pdfLabel ? () => {
+    pdfLabel.textContent = t(colorChoice.checked ? 'editor.files.save_pdf' : 'editor.files.save_pdf_vector');
+  } : null;
+  styleOptions.onchange?.();
   for (const button of dialog.querySelectorAll('[data-close]')) button.onclick = () => dialog.close();
   dialog.showModal();
 }
@@ -89,6 +102,7 @@ export async function saveAs(kind) {
     if (kind === 'canvas') return save(name() + '.canvas', JSON.stringify(canvasOf(), null, 2), 'application/json');
     if (kind === 'html') return await savePicture('html');
     if (kind === 'pdf') return await savePicture('pdf');
+    if (kind === 'html-color' || kind === 'pdf-color') return await saveColorPicture(kind === 'pdf-color');
     if (kind === 'mermaid-lr') return save(name() + '.md', mermaidOf('LR'), 'text/markdown;charset=utf-8');
     if (kind === 'mermaid-tb') return save(name() + '.md', mermaidOf('TB'), 'text/markdown;charset=utf-8');
   } catch (error) {
@@ -403,6 +417,23 @@ async function savePicture(format) {
   doc.setCreator(t('editor.layout.title'));
   download(new Blob([await doc.save()], { type: 'application/pdf' }), name() + '.pdf');
   toast(t('editor.files.saved'));
+}
+
+async function saveColorPicture(pdf) {
+  const file = name() + '-color';
+  const scene = await pictureSnapshot();
+  if (!pdf) return save(file + '.html', pictureHtml(scene), 'text/html;charset=utf-8');
+
+  await script('vendor/pdf/pdf-lib.min.js');
+  const doc = await window.PDFLib.PDFDocument.create();
+  const image = await doc.embedPng(await picturePng(scene));
+  const scale = Math.min(0.75, 14000 / Math.max(scene.width, scene.height));
+  const width = scene.width * scale, height = scene.height * scale;
+  const page = doc.addPage([width, height]);
+  page.drawImage(image, { x: 0, y: 0, width, height });
+  doc.setTitle(scene.title);
+  doc.setCreator(t('editor.layout.title'));
+  save(file + '.pdf', await doc.save(), 'application/pdf');
 }
 
 /* ── Открыть ──────────────────────────────────────────────────── */
